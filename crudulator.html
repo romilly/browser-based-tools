@@ -43,6 +43,10 @@ header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; ju
 h1 { font-size: 20px; font-weight: 600; margin: 0; }
 .file-info { font-family: var(--font-code); font-size: 12.5px; color: var(--muted); }
 .file-info b { color: var(--fg); font-weight: 500; }
+.name-btn { all: unset; cursor: pointer; color: var(--fg); font-weight: 500; border-radius: 3px; }
+.name-btn span { color: var(--muted); font-size: 11px; }
+.name-btn:hover { text-decoration: underline; }
+.name-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tag { display: inline-block; font-family: var(--font-ui); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
   border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; margin-left: 6px; color: var(--muted); }
 .tag.dirty { border-color: var(--accent); color: var(--accent); }
@@ -245,6 +249,8 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 
     <h3>Opening and saving</h3>
     <p>Everything happens in your browser; nothing is uploaded. <b>Open database…</b> (or dropping a file onto the page) loads an existing SQLite file, and you can work with any of its tables. Your changes are held in memory until you click <b>Download database</b>. The file name shows <i>Unsaved changes</i> when there is something to download.</p>
+    <p><b>New database</b> asks for a file name. To change the name of any database, click its name under the title; the new name is used the next time you download. If you leave out the extension, <code>.db</code> is added.</p>
+    <p>Nothing is kept in the browser between visits: if you reload or close the page without downloading, your changes are lost. The page warns you before you leave with unsaved changes.</p>
     <p>When the page is opened inside Claude, the database is saved inside a <code>.zip</code> file, because Claude doesn't allow <code>.db</code> downloads directly.</p>
 
     <h3>Requirements</h3>
@@ -300,9 +306,23 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   function markDirty() { dirty = true; showFileInfo(); }
   function showFileInfo() {
     const size = fmtBytes(db.export().length);
-    $('file-info').innerHTML = '<b>' + esc(fileName) + '</b> · ' + size +
+    $('file-info').innerHTML = '<button type="button" class="name-btn" id="name-btn" title="Rename the database file">' +
+      esc(fileName) + ' <span aria-hidden="true">✎</span></button> · ' + size +
       (isSample ? '<span class="tag">Sample data</span>' : '') +
       (dirty ? '<span class="tag dirty">Unsaved changes</span>' : '');
+    $('name-btn').addEventListener('click', () => {
+      const name = askFileName('File name for this database', fileName);
+      if (name && name !== fileName) { fileName = name; showFileInfo(); }
+    });
+  }
+  // Ask for a file name; returns a cleaned-up name ending in an extension, or null if cancelled.
+  function askFileName(message, suggested) {
+    const raw = prompt(message, suggested);
+    if (raw === null) return null;
+    let name = raw.trim().replace(/[\\/:*?"<>|]/g, '_');
+    if (!name) return null;
+    if (!/\.[A-Za-z0-9]+$/.test(name)) name += '.db';
+    return name;
   }
   window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -648,7 +668,9 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   // ---------- file actions ----------
   $('new-db-btn').addEventListener('click', () => {
     if (dirty && !confirm('You have unsaved changes. Start a new database anyway?')) return;
-    setDb(new SQL.Database(), 'crud.db', false);
+    const name = askFileName('File name for the new database', 'crud.db');
+    if (!name) return;
+    setDb(new SQL.Database(), name, false);
   });
   $('open-btn').addEventListener('click', () => $('file-input').click());
   $('file-input').addEventListener('change', e => { if (e.target.files[0]) readFile(e.target.files[0]); e.target.value = ''; });
