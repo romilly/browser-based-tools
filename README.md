@@ -35,3 +35,26 @@ Each screen works with one table at a time; screen designers are planned.
 ---
 
 Both tools need an internet connection on first load, to fetch sql.js and JSZip from cdnjs.
+
+## Running the tests
+
+The tests are written with [pytest](https://pytest.org) and [Playwright](https://playwright.dev/python/): they open the pages in a real browser, click through them, and check the downloaded databases with Python's `sqlite3`.
+
+One-time setup, from the repository folder:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+playwright install chromium
+```
+
+Then, with the venv active:
+
+```bash
+pytest                    # run everything, headless
+pytest --headed           # watch the browser while the tests run
+pytest -k link            # run only tests with "link" in their name
+```
+
+The tests serve the repository from a local web server, so no setup is needed beyond the above. The pages fetch sql.js and JSZip from cdnjs; to run offline, put `sql-asm.js` and `jszip.min.js` in a folder and set `CRUD_LOCAL_LIBS` to its path.

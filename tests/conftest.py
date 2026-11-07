@@ -1,0 +1,220 @@
+"""Shared fixtures: a local web server for the repo, and an App helper that drives crudulator.html.
+
+The pages load sql.js and JSZip from cdnjs. To run without internet access, set CRUD_LOCAL_LIBS
+to a folder containing sql-asm.js and jszip.min.js; requests for them are then served from there.
+"""
+import functools
+import http.server
+import os
+import sqlite3
+import threading
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+LOCAL_LIBS = os.environ.get('CRUD_LOCAL_LIBS')
+
+
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture(scope='session')
+def server():
+    """Serve the repository over http, as GitHub Pages does (IndexedDB needs a real origin)."""
+    handler = functools.partial(QuietHandler, directory=str(ROOT))
+    httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f'http://127.0.0.1:{httpd.server_port}'
+    httpd.shutdown()
+
+
+def _use_local_libs(page):
+    folder = Path(LOCAL_LIBS)
+
+    def route(r):
+        name = r.request.url.rsplit('/', 1)[-1]
+        if (folder / name).exists():
+            r.fulfill(path=str(folder / name), content_type='application/javascript')
+        else:
+            r.abort()
+
+    page.route('https://cdnjs.cloudflare.com/**', route)
+    page.route('https://fonts.googleapis.com/**', lambda r: r.abort())
+    page.route('https://fonts.gstatic.com/**', lambda r: r.abort())
+
+
+class App:
+    """Drives crudulator.html. Dialogs are handled automatically: confirms are accepted,
+    and prompts are answered from `prompt_answers` (or cancelled if it's empty)."""
+
+    def __init__(self, page, url):
+        self.page, self.url = page, url
+        self.prompt_answers = []
+        self.dialogs = []
+        self.errors = []
+        page.on('dialog', self._on_dialog)
+        page.on('pageerror', lambda e: self.errors.append(str(e)))
+
+    def _on_dialog(self, d):
+        self.dialogs.append(d.type)
+        if d.type == 'prompt':
+            d.accept(self.prompt_answers.pop(0)) if self.prompt_answers else d.dismiss()
+        else:
+            d.accept()
+
+    # --- page state ---
+    def load(self):
+        self.page.goto(self.url)
+        self.page.wait_for_selector('#name-btn')
+
+    def flush(self):
+        """Wait until the browser copy is written, so a reload sees it. Reading IndexedDB
+        queues behind any pending write, so this returns what was stored."""
+        return self.page.evaluate("""() => new Promise((resolve, reject) => {
+            const req = indexedDB.open('crudulator', 1);
+            req.onerror = () => reject(req.error);
+            req.onsuccess = () => {
+                const get = req.result.transaction('files').objectStore('files').get('current');
+                get.onsuccess = () => resolve(get.result ? { name: get.result.name, dirty: get.result.dirty } : null);
+            };
+        })""")
+
+    def reload(self):
+        self.flush()
+        self.load()
+
+    @property
+    def info(self):
+        return self.page.inner_text('#file-info').lower()
+
+    @property
+    def file_name(self):
+        return self.page.inner_text('#name-btn').replace('✎', '').strip()
+
+    def rows(self):
+        return self.page.locator('#grid tbody tr').count()
+
+    def grid_text(self):
+        return self.page.inner_text('#grid')
+
+    # --- actions ---
+    def choose_table(self, name):
+        self.page.select_option('#table-select', name)
+
+    def search(self, text):
+        self.page.fill('#search', text)
+        self.page.wait_for_timeout(300)   # the search box waits briefly for typing to stop
+
+    def sort_by(self, column):
+        self.page.click(f'[data-sort="{column}"]')
+
+    def first_row(self):
+        return self.page.locator('#grid tbody tr').first.inner_text().split('\t')
+
+    def open_row(self, text):
+        self.page.locator('#grid tbody tr', has_text=text).click()
+
+    def fill_form(self, **fields):
+        for col, value in fields.items():
+            el = self.page.locator(f'[data-col="{col}"]')
+            tag = el.evaluate('e => e.tagName + (e.type ? ":" + e.type : "")')
+            if tag == 'INPUT:checkbox':
+                el.set_checked(bool(value))
+            elif tag.startswith('SELECT'):
+                el.select_option(label=value)
+            else:
+                el.fill(str(value))
+
+    def save_record(self):
+        self.page.click('#record-form button[type=submit]')
+
+    def add_record(self, **fields):
+        self.page.click('#new-record-btn')
+        self.fill_form(**fields)
+        self.save_record()
+
+    def record_error(self):
+        return self.page.inner_text('#record-error')
+
+    def open_file(self, path):
+        self.page.set_input_files('#file-input', str(path))
+        self.page.wait_for_function(
+            "name => document.querySelector('#name-btn').innerText.includes(name)", arg=Path(path).name)
+
+    def download(self, folder):
+        with self.page.expect_download() as d:
+            self.page.click('#save-btn')
+        path = Path(folder) / d.value.suggested_filename
+        d.value.save_as(path)
+        return path
+
+    # --- designer ---
+    def new_table(self, name, *columns):
+        """columns: (name, type_value, required) tuples; type_value as in the Type box, e.g. 'INTEGER' or 'REF:cds'."""
+        self.page.click('#new-table-btn')
+        self.page.fill('#d-name', name)
+        for i, (col, kind, required) in enumerate(columns):
+            if i:
+                self.page.click('#d-add-col')
+            row = self.page.locator('#d-cols .col-row').nth(i)
+            row.locator('input[type=text]').fill(col)
+            row.locator('select').select_option(kind)
+            row.locator('input[type=checkbox]').set_checked(required)
+
+    def edit_design(self):
+        self.page.click('#design-btn')
+
+    def add_column(self, name, kind='TEXT'):
+        self.page.click('#d-add-col')
+        row = self.page.locator('#d-cols .col-row:not(.fixed)').last
+        row.locator('input[type=text]').fill(name)
+        row.locator('select').select_option(kind)
+
+    def remove_column(self, name):
+        self.page.locator('.col-row.fixed', has=self.page.locator(f'span:text-is("{name}")')).locator('button').click()
+
+    def convert_to_link(self, column, target):
+        self.page.select_option(f'select[aria-label="Type of {column}"]', target)
+
+    def save_design(self):
+        self.page.click('#d-save')
+
+    @property
+    def sql_preview(self):
+        return self.page.inner_text('#d-sql')
+
+    @property
+    def design_error(self):
+        return self.page.inner_text('#d-error')
+
+
+@pytest.fixture
+def app(page, server):
+    """A fresh CRUDulator page; each test gets a new browser context, so browser storage starts empty."""
+    if LOCAL_LIBS:
+        _use_local_libs(page)
+    a = App(page, server + '/crudulator.html')
+    a.load()
+    yield a
+    assert not a.errors, f'JavaScript errors on the page: {a.errors}'
+
+
+@pytest.fixture
+def cds_db(tmp_path):
+    """A small database like the CDs example: cds.Issuer holds issuer names as text."""
+    path = tmp_path / 'CDS.db'
+    con = sqlite3.connect(path)
+    con.executescript('''
+        CREATE TABLE "cds" ("id" INTEGER PRIMARY KEY, "Title" TEXT, "Issuer" TEXT, "cd_count" INTEGER, "Description" LONGTEXT);
+        CREATE TABLE "Issuers" ("id" INTEGER PRIMARY KEY, "Name" TEXT);
+        INSERT INTO Issuers (Name) VALUES ('Naxos'), ('Hyperion');
+        INSERT INTO cds (Title, Issuer, cd_count, Description) VALUES
+          ('The Marriage of Figaro', 'Naxos', 3, 'Mozart''s classic opera'),
+          ('Winterreise', 'Hyperion', 1, NULL);
+    ''')
+    con.commit()
+    con.close()
+    return path

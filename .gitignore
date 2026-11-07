@@ -1,0 +1,11 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Python and pytest caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Playwright output (traces, screenshots, videos)
+test-results/
