@@ -42,6 +42,8 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 
 - **Add, edit and delete branches:** Tab adds a child, Enter adds a sibling, F2 or a double-click (double-tap on a tablet) edits a title, and Delete removes a branch with everything below it. The toolbar buttons do the same on touch screens.
 - **Notes:** select a branch and type in the Note panel. Branches with a note show a small page icon, and hovering shows the note.
+- **Web links:** type an address in the Link box to attach it to a branch (`https://` is added if you leave it out). The branch shows a link icon that opens the page in a new tab.
+- **Connectors:** a dashed arrow from any branch to any other, with an optional label, like Freeplane's connectors. Select the first branch, choose **Connect** (or press C), then click the second. Click a connector to change its label or delete it.
 - **Fold branches:** Space folds or unfolds a branch. A folded branch shows a circle with the number of hidden nodes; click it to unfold.
 - **Move around:** the arrow keys move between branches, and you can drag the empty space (or swipe) to scroll the map.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the toolbar buttons.

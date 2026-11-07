@@ -16,6 +16,30 @@
           "type": "string",
           "description": "Rich text note attached to the node"
         },
+        "link": {
+          "type": "string",
+          "description": "A web address (URL) attached to the node"
+        },
+        "connectors": {
+          "type": "array",
+          "description": "Arrows from this node to other nodes",
+          "items": {
+            "type": "object",
+            "required": ["to"],
+            "properties": {
+              "to": {
+                "type": "string",
+                "pattern": "^root(/[a-zA-Z0-9_]+)*$",
+                "description": "Path of the target node: 'root', then each child key in turn, separated by '/'"
+              },
+              "label": {
+                "type": "string",
+                "description": "Optional text shown on the connector"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
         "children": {
           "type": "object",
           "description": "Child nodes of this node",

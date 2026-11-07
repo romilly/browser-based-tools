@@ -49,6 +49,24 @@ class MindMap:
     def new_map(self):
         self.page.click('#bNew')
 
+    def add_link(self, title, url):
+        self.node(title).click()
+        self.page.fill('#link', url)
+        self.page.press('#link', 'Enter')
+
+    def connect(self, source, target, label=''):
+        self.node(source).click()
+        self.page.click('#bConnect')
+        self.node(target).click()
+        if label:
+            self.page.fill('#connLabel', label)
+
+    def connectors(self):
+        return self.page.locator('#edges path.conn').count()
+
+    def connector_labels(self):
+        return self.page.locator('#edges .clabel').all_text_contents()
+
 
 @pytest.fixture
 def mm(page, server):
@@ -164,3 +182,89 @@ def test_siblings_with_the_same_title_keep_separate_keys(mm, tmp_path):
     assert names == ['new_mind_map.yaml']
     jsonschema.validate(data, SCHEMA)
     assert list(data['root']['children']) == ['new_node', 'new_node_2']
+
+
+# ---------- web links on nodes ----------
+
+def test_a_link_shows_an_icon_that_opens_it_in_a_new_tab(mm):
+    mm.add_link('SQLite browser', 'example.org/sqlite')
+    icon = mm.node('SQLite browser').locator('a.li')
+    assert icon.get_attribute('href') == 'https://example.org/sqlite'
+    assert icon.get_attribute('target') == '_blank'
+
+
+def test_clearing_the_link_box_removes_the_link(mm):
+    mm.add_link('SQLite browser', 'https://example.org')
+    mm.add_link('SQLite browser', '')
+    assert mm.node('SQLite browser').locator('a.li').count() == 0
+
+
+# ---------- connectors between nodes ----------
+
+def test_a_connector_is_drawn_with_its_label(mm):
+    mm.connect('Foreign keys', 'Multiple tables', 'needs')
+    assert mm.connectors() == 1
+    assert mm.connector_labels() == ['needs']
+
+
+def test_escape_cancels_connecting(mm):
+    mm.node('Foreign keys').click()
+    mm.page.click('#bConnect')
+    mm.page.keyboard.press('Escape')
+    mm.node('Multiple tables').click()
+    assert mm.connectors() == 0
+
+
+def test_a_selected_connector_can_be_deleted(mm):
+    mm.connect('Foreign keys', 'SQLite browser', 'uses')
+    mm.page.locator('#edges .clabel').click()
+    assert mm.page.is_visible('#connPanel')
+    mm.page.click('#connDel')
+    assert mm.connectors() == 0
+
+
+def test_deleting_a_node_removes_connectors_to_and_from_it(mm):
+    mm.connect('Foreign keys', 'SQLite browser')
+    mm.connect('SQLite browser', 'Demo video')
+    mm.node('SQLite browser').click()
+    mm.page.keyboard.press('Delete')
+    assert mm.connectors() == 0
+
+
+# ---------- saving and opening links and connectors ----------
+
+def test_links_and_connectors_are_saved_and_opened(mm, tmp_path):
+    mm.add_link('SQLite browser', 'https://example.org/sqlite')
+    mm.connect('Foreign keys', 'Multiple tables', 'needs')
+    mm.connect('Demo video', 'Toolbox')
+    (tmp_path / 'a').mkdir()
+    (tmp_path / 'b').mkdir()
+    first = mm.save(tmp_path / 'a')
+    _, data = read_zip(first)
+    jsonschema.validate(data, SCHEMA)
+    kids = data['root']['children']
+    assert kids['sqlite_browser']['link'] == 'https://example.org/sqlite'
+    assert kids['crudulator']['children']['foreign_keys']['connectors'] == [
+        {'to': 'root/crudulator/multiple_tables', 'label': 'needs'}]
+    assert kids['crudulator']['children']['demo_video']['connectors'] == [{'to': 'root'}]
+
+    mm.new_map()
+    mm.open(first)
+    assert mm.connectors() == 2
+    assert mm.connector_labels() == ['needs']
+    assert read_zip(mm.save(tmp_path / 'b')) == read_zip(first)
+
+
+def test_a_connector_to_a_missing_node_is_reported(mm, tmp_path):
+    before = mm.titles()
+    mm.open(write_zip(tmp_path / 'bad.zip', """
+root:
+  title: A
+  children:
+    b:
+      title: B
+      connectors:
+        - to: root/nowhere
+"""))
+    assert 'not in the map' in mm.message()
+    assert mm.titles() == before
