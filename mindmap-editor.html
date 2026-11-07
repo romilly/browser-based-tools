@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mind Map Editor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+/* Layout: toolbar band on top; scrolling map canvas fills the rest; note panel on the right (below the map on phones) */
+:root{
+  --bg:#f4f7f7; --canvas:#ffffff; --fg:#1d282c; --muted:#5d6e74; --line:#d6dfe1;
+  --accent:#2b6888; --sel:#d9eaf3; --panel:#eef3f4; --danger:#a5352a;
+  --b0:#c0392b; --b1:#2e7d4f; --b2:#2b6888; --b3:#8a559a; --b4:#b06f0c; --b5:#167d87;
+  --conn:#6f7f93;
+  --ui:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121819; --canvas:#172022; --fg:#e2eaec; --muted:#93a4a9; --line:#2b383b;
+  --accent:#86bddb; --sel:#22394a; --panel:#1a2427; --danger:#ec8a7e;
+  --b0:#ec7f72; --b1:#6fc493; --b2:#86bddb; --b3:#c79cd3; --b4:#e3ac52; --b5:#5cc6cf;
+  --conn:#9aabc0;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121819; --canvas:#172022; --fg:#e2eaec; --muted:#93a4a9; --line:#2b383b;
+  --accent:#86bddb; --sel:#22394a; --panel:#1a2427; --danger:#ec8a7e;
+  --b0:#ec7f72; --b1:#6fc493; --b2:#86bddb; --b3:#c79cd3; --b4:#e3ac52; --b5:#5cc6cf;
+  --conn:#9aabc0;
+  color-scheme:dark}
+
+[hidden]{display:none!important}
+html,body{height:100%}
+body{min-height:560px;margin:0}
+#vp:focus{outline:none}
+body{background:var(--bg);color:var(--fg);font-family:var(--ui);display:flex;flex-direction:column;overflow:hidden}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+
+header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding-block:8px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  border-bottom:1px solid var(--line)}
+header h1{font-size:15px;font-weight:600;margin:0;margin-right:8px;letter-spacing:.01em}
+.group{display:flex;flex-wrap:wrap;gap:4px}
+.sep{width:1px;align-self:stretch;background:var(--line)}
+button{font:inherit;font-size:13px;color:var(--fg);background:var(--canvas);border:1px solid var(--line);
+  border-radius:5px;padding:5px 10px;cursor:pointer;line-height:1.2}
+button:hover{border-color:var(--accent)}
+button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button:disabled{opacity:.45;cursor:default;border-color:var(--line)}
+button.danger{color:var(--danger)}
+button kbd{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
+
+main{flex:1;display:flex;min-height:0}
+#vp{flex:1;overflow:auto;position:relative;background:var(--canvas);min-width:0;cursor:default;touch-action:manipulation}
+#vp.panning{cursor:grabbing}
+#stage{position:relative}
+#edges{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+
+.node{position:absolute;max-width:22em;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.35;
+  padding:2px 5px 2px;border-bottom:2px solid var(--c);border-radius:3px 3px 0 0;cursor:pointer;user-select:none;
+  display:flex;align-items:flex-start;gap:4px}
+.node .t{outline:none;min-width:1ch}
+.node.d2{border-bottom-width:1.5px}
+.node.d3{border-bottom-width:1px;font-size:13px}
+.node.root{border:2px solid var(--fg);border-radius:12px;padding:8px 14px;font-size:17px;font-weight:600;background:var(--canvas)}
+.node.sel{background:var(--sel)}
+.node.editing{cursor:text;user-select:text;background:var(--sel);box-shadow:0 0 0 1px var(--accent)}
+.node.editing .t{min-width:4ch}
+.ni{flex:none;margin-top:3px;color:var(--muted)}
+.li{flex:none;display:inline-flex;margin-top:2px;color:var(--accent);border-radius:3px}
+.li:hover{background:var(--sel)}
+.li:focus-visible{outline:2px solid var(--accent)}
+#edges .conn{fill:none;stroke:var(--conn);stroke-width:1.4;stroke-dasharray:6 4}
+#edges .conn.sel{stroke:var(--accent);stroke-width:2.2}
+#edges .hit{fill:none;stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer}
+#edges .clabel{font:12px var(--ui);fill:var(--conn);paint-order:stroke;stroke:var(--canvas);stroke-width:4px;
+  stroke-linejoin:round;pointer-events:all;cursor:pointer}
+#edges .clabel.sel{fill:var(--accent);font-weight:600}
+#edges .arrow{fill:var(--conn)}
+#edges .arrow.sel{fill:var(--accent)}
+#vp.connecting, #vp.connecting .node{cursor:crosshair}
+.fold{position:absolute;bottom:-9px;width:16px;height:16px;border-radius:50%;border:1.5px solid var(--c);
+  background:var(--canvas);font-size:9px;font-weight:600;display:grid;place-items:center;color:var(--fg);font-family:var(--mono)}
+.node.r .fold{right:-17px}
+.node.l .fold{left:-17px}
+
+aside{width:300px;flex:none;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;
+  padding:12px 16px;padding-right:max(16px,env(safe-area-inset-right,0px));gap:8px;min-height:0;overflow:auto}
+aside label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.pane{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0}
+#noteFor,#connWhat{font-weight:600;font-size:14px;overflow-wrap:anywhere}
+aside input{font:14px var(--ui);color:var(--fg);background:var(--canvas);border:1px solid var(--line);border-radius:5px;
+  padding:6px 8px;min-width:0;width:100%}
+aside input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#connDel{align-self:flex-start}
+#note{flex:1;min-height:120px;resize:none;font:14px/1.5 var(--ui);color:var(--fg);background:var(--canvas);
+  border:1px solid var(--line);border-radius:5px;padding:8px}
+#dlg{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);display:grid;place-items:center;z-index:20;
+  padding:16px}
+#dlg .box{background:var(--canvas);border:1px solid var(--line);border-radius:8px;width:min(640px,100%);max-height:100%;
+  overflow:auto;display:flex;flex-direction:column;gap:14px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+#dlg .top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#dlg h2{margin:0;font-size:16px}
+#dlg h3{margin:0 0 6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+#dlg p{margin:0;font-size:13.5px;line-height:1.5;max-width:65ch}
+.keys{font-size:13.5px;display:grid;grid-template-columns:max-content 1fr;gap:5px 14px;margin:0}
+.keys dt{font-size:13.5px;color:var(--fg);white-space:nowrap}
+.keys dd{margin:0;color:var(--muted)}
+.keys kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--bg)}
+
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;
+  max-width:min(560px,calc(100% - 32px));background:var(--fg);color:var(--canvas);padding:8px 14px;border-radius:6px;
+  font-size:13.5px;line-height:1.4;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+#toast.err{background:var(--danger)}
+main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
+
+@media (max-width:720px){
+  main{flex-direction:column}
+  aside{width:auto;border-left:0;border-top:1px solid var(--line);height:34%;flex:none;
+    padding-left:max(16px,env(safe-area-inset-left,0px))}
+  button kbd{display:none}
+}
+@media (prefers-reduced-motion:no-preference){ .node{transition:background-color .12s} }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Mind Map Editor</h1>
+  <div class="group">
+    <button id="bChild" title="Add child (Tab or Insert)">Child<kbd>Tab</kbd></button>
+    <button id="bSib" title="Add sibling (Enter)">Sibling<kbd>↵</kbd></button>
+    <button id="bEdit" title="Edit title (F2 or double-click)">Edit<kbd>F2</kbd></button>
+    <button id="bFold" title="Fold or unfold (Space)">Fold<kbd>Space</kbd></button>
+    <button id="bConnect" title="Connect to another node (C)">Connect<kbd>C</kbd></button>
+    <button id="bDel" class="danger" title="Delete branch (Delete)">Delete<kbd>Del</kbd></button>
+  </div>
+  <span class="sep"></span>
+  <div class="group">
+    <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="bRedo" title="Redo (Ctrl+Y)">Redo</button>
+  </div>
+  <span class="sep"></span>
+  <div class="group">
+    <button id="bOpen" title="Open a .zip or .yaml mind map">Open…</button>
+    <button id="bSave" title="Save the map as a zipped YAML file">Save</button>
+    <button id="bNew">New map</button>
+    <button id="bHelp" title="Help (?)">Help<kbd>?</kbd></button>
+  </div>
+</header>
+
+<input id="fileIn" type="file" accept=".zip,.yaml,.yml" hidden>
+<div id="toast" role="status" hidden></div>
+
+<main>
+  <div id="vp"><div id="stage"><svg id="edges"></svg></div></div>
+  <aside>
+    <div class="pane" id="nodePanel">
+      <label>Selected node</label>
+      <div id="noteFor"></div>
+      <label for="link">Link</label>
+      <input id="link" type="url" inputmode="url" placeholder="https://example.org" autocomplete="off" spellcheck="false">
+      <label for="note">Note</label>
+      <textarea id="note" placeholder="No note yet. Type here to add one."></textarea>
+    </div>
+    <div class="pane" id="connPanel" hidden>
+      <label>Connector</label>
+      <div id="connWhat"></div>
+      <label for="connLabel">Label</label>
+      <input id="connLabel" placeholder="Optional label" autocomplete="off">
+      <button id="connDel" class="danger">Delete connector</button>
+    </div>
+  </aside>
+</main>
+
+<div id="dlg" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="dlgT">
+    <div class="top"><h2 id="dlgT">How to use the editor</h2><button id="hClose">Close</button></div>
+    <section>
+      <h3>Mouse and touch</h3>
+      <dl class="keys">
+        <dt>Click or tap</dt><dd>Select a node.</dd>
+        <dt>Double-click or tap</dt><dd>Edit the node's title.</dd>
+        <dt>Numbered circle</dt><dd>Shows a folded branch and how many nodes it hides. Click it to unfold.</dd>
+        <dt>Drag empty space</dt><dd>Move around the map. On a phone, swipe.</dd>
+        <dt>Hover a node</dt><dd>Shows its note, if it has one.</dd>
+        <dt>Link icon</dt><dd>Opens the node's web link in a new tab.</dd>
+        <dt>Click a connector</dt><dd>Select it to change its label or delete it.</dd>
+      </dl>
+    </section>
+    <section>
+      <h3>Keyboard</h3>
+      <dl class="keys">
+        <dt><kbd>Tab</kbd> or <kbd>Insert</kbd></dt><dd>Add a child to the selected node.</dd>
+        <dt><kbd>Enter</kbd></dt><dd>Add a sibling below the selected node. On the root, adds a child.</dd>
+        <dt><kbd>F2</kbd></dt><dd>Edit the selected title.</dd>
+        <dt><kbd>Delete</kbd></dt><dd>Delete the selected node and everything below it.</dd>
+        <dt><kbd>Space</kbd></dt><dd>Fold or unfold the selected branch.</dd>
+        <dt><kbd>C</kbd></dt><dd>Connect the selected node to another: then click the other node. <kbd>Esc</kbd> cancels.</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>Type a web link for the selected node.</dd>
+        <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Move towards or away from the root.</dd>
+        <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move between siblings.</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo. <kbd>Ctrl</kbd>+<kbd>Y</kbd> redoes.</dd>
+        <dt><kbd>?</kbd></dt><dd>Open this help.</dd>
+      </dl>
+    </section>
+    <section>
+      <h3>While editing a title</h3>
+      <dl class="keys">
+        <dt><kbd>Enter</kbd></dt><dd>Save the title.</dd>
+        <dt><kbd>Shift</kbd>+<kbd>Enter</kbd></dt><dd>Start a new line in the title.</dd>
+        <dt><kbd>Tab</kbd></dt><dd>Save and add a child.</dd>
+        <dt><kbd>Esc</kbd></dt><dd>Cancel the change.</dd>
+      </dl>
+    </section>
+    <section>
+      <h3>Links and connectors</h3>
+      <p>Type a web address in the <b>Link</b> box to attach it to the selected node; clear the box to remove it. If you leave out <code>https://</code>, it is added for you.</p>
+      <p>A connector is a dashed arrow from one node to any other, with an optional label. Select the first node, choose <b>Connect</b>, then click the second node and type a label if you want one. Deleting a node also deletes its connectors. When a branch is folded, its connectors go to the folded node.</p>
+    </section>
+    <section>
+      <h3>Notes</h3>
+      <p>Select a node and type in the Note panel. Nodes with a note show a small page icon. Press <kbd>Esc</kbd> to leave the note and go back to the map.</p>
+    </section>
+    <section>
+      <h3>Saving</h3>
+      <p><b>Save</b> downloads the map as a <code>.zip</code> file holding one YAML file. <b>Open</b> reads one of those, or a plain <code>.yaml</code> file, and replaces the current map; you can also drop a file onto the map. Undo brings back the map you replaced, until you reload the page.</p>
+      <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
+      <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const vp = $('#vp'), stage = $('#stage'), svg = $('#edges');
+const NS = 'http://www.w3.org/2000/svg';
+const HGAP = 34, VGAP = 10, BRANCH_COLORS = 6, STORE = 'mindmap-editor-v1';
+
+let uid = 0;
+const mk = (title, note = '', children = []) => ({ id: ++uid, title, note, link: '', connectors: [], children, folded: false, side: null });
+
+let root, sel, undoStack = [], redoStack = [], parents = new Map(), boxes = new Map();
+let editing = null;
+let selConn = null;      // { from: node id, i: index in that node's connectors }
+let connectFrom = null;  // node waiting for the user to pick a connector target
+
+/* ---------- model ---------- */
+function sample() {
+  const r = mk('Toolbox', 'Browser-based tools published in romilly/browser-based-tools.');
+  r.link = 'https://github.com/romilly/browser-based-tools';
+  const add = (p, side, n) => { n.side = side; p.children.push(n); return n; };
+  add(r, 'right', mk('CRUDulator', 'Makes SQLite data-entry apps with linked tables.', [
+    mk('Foreign keys'), mk('Multiple tables'), mk('Screen designer'),
+    mk('Demo video', 'Record with Playwright.')]));
+  add(r, 'right', mk('Mind map editor', '', [
+    mk('Edit branches and notes'),
+    mk('YAML import / export', 'Uses mindmap-schema.json.'),
+    mk('Freeplane .mm export')]));
+  add(r, 'left', mk('SQLite browser', 'Single-page viewer for SQLite files.'));
+  add(r, 'left', mk('Repo housekeeping', '', [mk('MIT License'), mk('Playwright tests in a local venv')]));
+  return r;
+}
+function indexParents() {
+  parents = new Map();
+  (function walk(n) { for (const c of n.children) { parents.set(c.id, n); walk(c); } })(root);
+}
+function findById(n, id) {
+  if (n.id === id) return n;
+  for (const c of n.children) { const f = findById(c, id); if (f) return f; }
+  return null;
+}
+function maxId(n) { return Math.max(n.id, ...n.children.map(maxId)); }
+function allNodes(n = root, out = []) { out.push(n); n.children.forEach(c => allNodes(c, out)); return out; }
+const conns = n => n.connectors || (n.connectors = []);
+function pruneConnectors() {
+  const ids = new Set(allNodes().map(n => n.id));
+  for (const n of allNodes()) n.connectors = conns(n).filter(c => ids.has(c.to) && c.to !== n.id);
+}
+function sideOf(n) {
+  if (n === root) return null;
+  let p = n; while (parents.get(p.id) !== root) p = parents.get(p.id);
+  return p.side || 'right';
+}
+function balanceSide() {
+  const r = root.children.filter(c => c.side !== 'left').length;
+  return r <= root.children.length - r ? 'right' : 'left';
+}
+
+/* ---------- persistence & undo ---------- */
+function save() { try { localStorage.setItem(STORE, JSON.stringify(root)); } catch (e) {} }
+function load() {
+  try { const s = localStorage.getItem(STORE); if (s) { const r = JSON.parse(s); if (r && r.title != null) return r; } } catch (e) {}
+  return null;
+}
+function snapshot() {
+  undoStack.push(JSON.stringify({ root, sel: sel.id }));
+  if (undoStack.length > 200) undoStack.shift();
+  redoStack = [];
+}
+function restore(state) {
+  const s = JSON.parse(state);
+  root = s.root; uid = maxId(root); indexParents();
+  sel = findById(root, s.sel) || root;
+  selConn = null; connectFrom = null; vp.classList.remove('connecting');
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(JSON.stringify({ root, sel: sel.id }));
+  restore(undoStack.pop()); changed();
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(JSON.stringify({ root, sel: sel.id }));
+  restore(redoStack.pop()); changed();
+}
+function changed() { indexParents(); save(); render(); }
+
+/* ---------- rendering & layout ---------- */
+function render() {
+  const oldRoot = boxes.get(root.id);
+  const anchor = oldRoot ? { x: oldRoot.x - vp.scrollLeft, y: oldRoot.y - vp.scrollTop } : null;
+
+  stage.querySelectorAll('.node').forEach(e => e.remove());
+  boxes = new Map();
+  const els = new Map();
+
+  (function build(n, depth, color, side) {
+    const el = document.createElement('div');
+    el.className = 'node' + (n === root ? ' root' : ` d${Math.min(depth, 3)} ${side === 'left' ? 'l' : 'r'}`) + (n === sel ? ' sel' : '');
+    el.dataset.id = n.id;
+    if (color != null) el.style.setProperty('--c', `var(--b${color})`);
+    const t = document.createElement('span'); t.className = 't'; t.textContent = n.title; el.append(t);
+    if (n.note && n.note.trim()) {
+      el.insertAdjacentHTML('beforeend', '<svg class="ni" width="11" height="13" viewBox="0 0 11 13" aria-label="has note"><path d="M1 .5h6.5L10.5 3.5v9H1z" fill="none" stroke="currentColor"/><path d="M3 6h5M3 8.5h5" stroke="currentColor"/></svg>');
+      el.title = n.note;
+    }
+    if (n.link) {
+      const a = document.createElement('a');
+      a.className = 'li'; a.href = n.link; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.title = n.link; a.setAttribute('aria-label', 'Open link: ' + n.link);
+      a.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M5 2H2v8h8V7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.5h3.5V5M10.5 1.5 5.5 6.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
+      el.append(a);
+    }
+    if (n.folded && n.children.length) {
+      const f = document.createElement('span'); f.className = 'fold'; f.textContent = countAll(n); el.append(f);
+    }
+    stage.append(el); els.set(n.id, el);
+    if (!n.folded || n === root) n.children.forEach((c, i) =>
+      build(c, depth + 1, n === root ? i % BRANCH_COLORS : color, n === root ? (c.side || 'right') : side));
+  })(root, 0, null, null);
+
+  for (const [id, el] of els) boxes.set(id, { w: el.offsetWidth, h: el.offsetHeight, x: 0, y: 0 });
+
+  const kids = n => (n.folded && n !== root) ? [] : n.children;
+  const memo = new Map();
+  const subH = n => {
+    if (memo.has(n.id)) return memo.get(n.id);
+    const ks = kids(n), b = boxes.get(n.id);
+    const h = ks.length ? Math.max(b.h, ks.reduce((s, c) => s + subH(c), 0) + VGAP * (ks.length - 1)) : b.h;
+    memo.set(n.id, h); return h;
+  };
+  function place(n, x, yc, dir) {
+    const b = boxes.get(n.id);
+    b.x = dir > 0 ? x : x - b.w; b.y = yc - b.h / 2;
+    placeKids(kids(n), dir > 0 ? b.x + b.w + HGAP : b.x - HGAP, yc, dir);
+  }
+  function placeKids(ks, x, yc, dir) {
+    if (!ks.length) return;
+    const total = ks.reduce((s, c) => s + subH(c), 0) + VGAP * (ks.length - 1);
+    let y = yc - total / 2;
+    for (const c of ks) { const h = subH(c); place(c, x, y + h / 2, dir); y += h + VGAP; }
+  }
+  const rb = boxes.get(root.id);
+  rb.x = -rb.w / 2; rb.y = -rb.h / 2;
+  placeKids(root.children.filter(c => c.side !== 'left'), rb.x + rb.w + HGAP + 6, 0, 1);
+  placeKids(root.children.filter(c => c.side === 'left'), rb.x - HGAP - 6, 0, -1);
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const b of boxes.values()) {
+    minX = Math.min(minX, b.x - 24); minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w + 24); maxY = Math.max(maxY, b.y + b.h + 12);
+  }
+  const pad = 80, cw = maxX - minX, ch = maxY - minY;
+  const W = Math.max(cw + pad * 2, vp.clientWidth), H = Math.max(ch + pad * 2, vp.clientHeight);
+  const ox = (W - cw) / 2 - minX, oy = (H - ch) / 2 - minY;
+  stage.style.width = W + 'px'; stage.style.height = H + 'px';
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+  for (const [id, b] of boxes) {
+    b.x += ox; b.y += oy;
+    const el = els.get(id); el.style.left = b.x + 'px'; el.style.top = b.y + 'px';
+  }
+
+  svg.replaceChildren();
+  (function edges(n, depth) {
+    if (n.folded && n !== root) return;
+    const p = boxes.get(n.id);
+    for (const [i, c] of n.children.entries()) {
+      const b = boxes.get(c.id); if (!b) continue;
+      const dir = (n === root ? c.side !== 'left' : b.x > p.x) ? 1 : -1;
+      const px = dir > 0 ? p.x + p.w : p.x;
+      const py = n === root ? p.y + p.h / 2 : p.y + p.h - 1;
+      const cx = dir > 0 ? b.x : b.x + b.w, cy = b.y + b.h - 1;
+      const dx = cx - px;
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', `M${px},${py} C${px + dx * .55},${py} ${cx - dx * .55},${cy} ${cx},${cy}`);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', els.get(c.id).style.getPropertyValue('--c'));
+      path.setAttribute('stroke-width', depth === 0 ? 2.5 : depth === 1 ? 1.6 : 1.1);
+      svg.append(path);
+      edges(c, depth + 1);
+    }
+  })(root, 0);
+  drawConnectors();
+
+  const nr = boxes.get(root.id);
+  if (anchor) { vp.scrollLeft = nr.x - anchor.x; vp.scrollTop = nr.y - anchor.y; }
+  else { vp.scrollLeft = nr.x + nr.w / 2 - vp.clientWidth / 2; vp.scrollTop = nr.y + nr.h / 2 - vp.clientHeight / 2; }
+  showSelection();
+}
+function visibleBox(id) {
+  // A node hidden inside a folded branch is drawn at the nearest visible ancestor.
+  let n = findById(root, id);
+  while (n && !boxes.has(n.id)) n = parents.get(n.id);
+  return n ? { node: n, b: boxes.get(n.id) } : null;
+}
+function drawConnectors() {
+  const defs = document.createElementNS(NS, 'defs');
+  defs.innerHTML = '<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0 10,5 0,10z"/></marker>' +
+    '<marker id="arrSel" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow sel" d="M0,0 10,5 0,10z"/></marker>';
+  svg.append(defs);
+  for (const n of allNodes()) conns(n).forEach((c, i) => {
+    const A = visibleBox(n.id), B = visibleBox(c.to);
+    if (!A || !B || A.node === B.node) return;
+    const a = A.b, b = B.b;
+    const acx = a.x + a.w / 2, bcx = b.x + b.w / 2, y1 = a.y + a.h / 2, y2 = b.y + b.h / 2;
+    let x1, x2, c1, c2;
+    if (Math.abs(bcx - acx) > (a.w + b.w) / 2 + 10) {
+      const dir = bcx > acx ? 1 : -1, off = Math.max(40, Math.abs(bcx - acx) / 3);
+      x1 = dir > 0 ? a.x + a.w : a.x; x2 = dir > 0 ? b.x : b.x + b.w;
+      c1 = x1 + dir * off; c2 = x2 - dir * off;
+    } else {
+      // One above the other: loop out on the side of the map they are on.
+      const side = sideOf(A.node === root ? B.node : A.node);
+      const out = side === 'left' ? -1 : 1, off = 50 + Math.abs(y2 - y1) * 0.3;
+      x1 = out > 0 ? a.x + a.w : a.x; x2 = out > 0 ? b.x + b.w : b.x;
+      c1 = Math.max(x1 * out, x2 * out) * out + out * off; c2 = c1;
+    }
+    const d = `M${x1},${y1} C${c1},${y1} ${c2},${y2} ${x2},${y2}`;
+    const isSel = selConn && selConn.from === n.id && selConn.i === i;
+    const line = document.createElementNS(NS, 'path');
+    line.setAttribute('d', d); line.setAttribute('class', 'conn' + (isSel ? ' sel' : ''));
+    line.setAttribute('marker-end', isSel ? 'url(#arrSel)' : 'url(#arr)');
+    const hit = document.createElementNS(NS, 'path');
+    hit.setAttribute('d', d); hit.setAttribute('class', 'hit');
+    hit.dataset.from = n.id; hit.dataset.i = i;
+    svg.append(line, hit);
+    if (c.label) {
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('class', 'clabel' + (isSel ? ' sel' : ''));
+      t.setAttribute('x', (x1 + 3 * c1 + 3 * c2 + x2) / 8); t.setAttribute('y', (y1 + y2) / 2 - 5);
+      t.setAttribute('text-anchor', 'middle');
+      t.dataset.from = n.id; t.dataset.i = i;
+      t.textContent = c.label;
+      svg.append(t);
+    }
+  });
+}
+function countAll(n) { return n.children.reduce((s, c) => s + 1 + countAll(c), 0); }
+const elOf = n => stage.querySelector(`.node[data-id="${n.id}"]`);
+
+function showSelection() {
+  stage.querySelectorAll('.node.sel').forEach(e => e.classList.remove('sel'));
+  const c = currentConn();
+  $('#nodePanel').hidden = !!c; $('#connPanel').hidden = !c;
+  if (c) {
+    const from = findById(root, selConn.from), to = findById(root, c.to);
+    $('#connWhat').textContent = `${from.title} → ${to.title}`;
+    const cl = $('#connLabel'); if (document.activeElement !== cl) cl.value = c.label || '';
+  } else {
+    const el = elOf(sel);
+    if (el) { el.classList.add('sel'); el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+  }
+  $('#noteFor').textContent = sel.title;
+  const ta = $('#note'); if (document.activeElement !== ta) ta.value = sel.note || '';
+  const li = $('#link'); if (document.activeElement !== li) li.value = sel.link || '';
+  $('#bDel').disabled = !c && sel === root;
+  $('#bConnect').disabled = !!c;
+  $('#bFold').disabled = !sel.children.length || sel === root;
+  $('#bUndo').disabled = !undoStack.length; $('#bRedo').disabled = !redoStack.length;
+}
+function select(n) {
+  if (!n) return;
+  const hadConn = !!selConn;
+  sel = n; selConn = null;
+  hadConn ? render() : showSelection();
+}
+function currentConn() {
+  if (!selConn) return null;
+  const n = findById(root, selConn.from);
+  return n && conns(n)[selConn.i] || null;
+}
+function selectConn(from, i) {
+  if (editing) finishEdit(true);
+  cancelConnect();
+  selConn = { from, i };
+  render();
+}
+
+/* ---------- commands ---------- */
+function addChild() {
+  snapshot();
+  const c = mk('New node');
+  if (sel === root) c.side = balanceSide();
+  sel.folded = false; sel.children.push(c); sel = c;
+  changed(); startEdit(true);
+}
+function addSibling() {
+  if (sel === root) return addChild();
+  snapshot();
+  const p = parents.get(sel.id), c = mk('New node');
+  c.side = sel.side;
+  p.children.splice(p.children.indexOf(sel) + 1, 0, c); sel = c;
+  changed(); startEdit(true);
+}
+function del() {
+  if (currentConn()) return delConn();
+  if (sel === root) return;
+  snapshot();
+  const p = parents.get(sel.id), sibs = p.children, i = sibs.indexOf(sel);
+  sibs.splice(i, 1);
+  const same = sibs.filter(s => p !== root || s.side === sel.side);
+  sel = same.find(s => sibs.indexOf(s) >= i) || same[same.length - 1] || p;
+  pruneConnectors();
+  changed();
+}
+function delConn() {
+  const n = findById(root, selConn.from);
+  snapshot();
+  conns(n).splice(selConn.i, 1);
+  sel = n; selConn = null;
+  changed(); vp.focus({ preventScroll: true });
+}
+function startConnect() {
+  if (currentConn()) return;
+  if (editing) finishEdit(true);
+  connectFrom = sel; lastTap = { id: 0, t: 0 };
+  vp.classList.add('connecting');
+  toast(`Click the node to connect “${sel.title}” to. Esc cancels.`);
+}
+function cancelConnect() {
+  if (!connectFrom) return;
+  connectFrom = null; vp.classList.remove('connecting');
+  $('#toast').hidden = true;
+}
+function finishConnect(target) {
+  const from = connectFrom;
+  if (target === from) { toast('Choose a different node to connect to.'); return; }
+  cancelConnect();
+  snapshot();
+  conns(from).push({ to: target.id, label: '' });
+  sel = from; selConn = { from: from.id, i: conns(from).length - 1 };
+  changed();
+  $('#connLabel').focus();
+}
+function toggleFold() {
+  if (sel === root || !sel.children.length) return;
+  snapshot(); sel.folded = !sel.folded; changed();
+}
+function startEdit(isNew = false) {
+  const el = elOf(sel); if (!el) return;
+  const t = el.querySelector('.t');
+  editing = { node: sel, before: sel.title, isNew };
+  el.classList.add('editing');
+  try { t.contentEditable = 'plaintext-only'; } catch (err) {}
+  if (t.contentEditable !== 'plaintext-only') t.contentEditable = 'true';
+  t.focus();
+  const r = document.createRange(); r.selectNodeContents(t);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  t.onkeydown = e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finishEdit(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finishEdit(false); }
+    else if (e.key === 'Tab') { e.preventDefault(); finishEdit(true); addChild(); }
+    e.stopPropagation();
+  };
+  t.onblur = e => finishEdit(true, e.relatedTarget);
+}
+function finishEdit(commit, movedTo = null) {
+  if (!editing) return;
+  const { node, before, isNew } = editing; editing = null;
+  const el = elOf(node), t = el && el.querySelector('.t');
+  let text = t ? t.innerText.replace(/\n+$/, '').trim() : before;
+  if (!commit || !text) text = before;
+  if (text !== before) { if (!isNew) snapshot(); node.title = text; }
+  resizePending = false;
+  changed();
+  if (!movedTo || !movedTo.matches('input, textarea, button')) vp.focus({ preventScroll: true });
+}
+function navigate(key) {
+  const side = sideOf(sel), kidsVisible = sel === root || !sel.folded;
+  const toChild = s => {
+    const ks = sel === root ? sel.children.filter(c => (c.side || 'right') === s) : sel.children;
+    if (!ks.length) return;
+    if (sel.folded) { sel.folded = false; changed(); }
+    select(ks[0]);
+  };
+  if (key === 'ArrowRight') {
+    if (sel === root) toChild('right');
+    else if (side === 'right') kidsVisible || sel.children.length ? toChild('right') : 0;
+    else select(parents.get(sel.id));
+  } else if (key === 'ArrowLeft') {
+    if (sel === root) toChild('left');
+    else if (side === 'left') toChild('left');
+    else select(parents.get(sel.id));
+  } else if (sel !== root) {
+    const p = parents.get(sel.id);
+    const sibs = p === root ? p.children.filter(c => (c.side || 'right') === side) : p.children;
+    const i = sibs.indexOf(sel) + (key === 'ArrowDown' ? 1 : -1);
+    if (sibs[i]) select(sibs[i]);
+  }
+}
+
+/* ---------- zipped YAML ---------- */
+function slug(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40); }
+const ordered = n => n === root
+  ? [...n.children.filter(c => c.side !== 'left'), ...n.children.filter(c => c.side === 'left')]
+  : n.children;
+// Each node's key among its siblings, and its path from the root ("root/crudulator/foreign_keys").
+function keyPaths() {
+  const keys = new Map(), paths = new Map();
+  (function walk(n, path) {
+    paths.set(n.id, path);
+    const used = new Set();
+    for (const c of ordered(n)) {
+      let k = slug(c.title) || 'node', base = k, i = 2;
+      while (used.has(k)) k = `${base}_${i++}`;
+      used.add(k); keys.set(c.id, k);
+      walk(c, path + '/' + k);
+    }
+  })(root, 'root');
+  return { keys, paths };
+}
+function toObj(n, kp) {
+  const o = { title: n.title };
+  if (n.note && n.note.trim()) o.note = n.note;
+  if (n.link) o.link = n.link;
+  const cs = conns(n).filter(c => kp.paths.has(c.to));
+  if (cs.length) o.connectors = cs.map(c => c.label ? { to: kp.paths.get(c.to), label: c.label } : { to: kp.paths.get(c.to) });
+  if (n.children.length) {
+    o.children = {};
+    for (const c of ordered(n)) o.children[kp.keys.get(c.id)] = toObj(c, kp);
+  }
+  return o;
+}
+function toYaml() { return jsyaml.dump({ root: toObj(root, keyPaths()) }, { lineWidth: -1, noRefs: true, sortKeys: false }); }
+function fromYaml(text) {
+  let doc;
+  try { doc = jsyaml.load(text); }
+  catch (e) { throw new Error('This file is not valid YAML: ' + (e.reason || e.message) + '.'); }
+  if (!doc || typeof doc !== 'object' || !doc.root) throw new Error('This file has no top-level "root" key, so it is not a mind map.');
+  let next = 0;
+  const byPath = new Map(), pending = [];
+  const conv = (o, path) => {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(`In this file, ${path} is not a node.`);
+    if (typeof o.title !== 'string') throw new Error(`In this file, ${path} has no title.`);
+    if (o.link != null && typeof o.link !== 'string') throw new Error(`In this file, the link on ${path} is not text.`);
+    const n = { id: ++next, title: o.title, note: typeof o.note === 'string' ? o.note : '', link: o.link || '',
+                connectors: [], children: [], folded: false, side: null };
+    byPath.set(path, n);
+    if (o.connectors != null) {
+      if (!Array.isArray(o.connectors)) throw new Error(`In this file, the connectors on ${path} are not a list.`);
+      for (const c of o.connectors) {
+        if (!c || typeof c.to !== 'string') throw new Error(`In this file, a connector on ${path} has no "to".`);
+        pending.push({ n, path, to: c.to, label: typeof c.label === 'string' ? c.label : '' });
+      }
+    }
+    if (o.children != null) {
+      if (typeof o.children !== 'object' || Array.isArray(o.children)) throw new Error(`In this file, ${path}/children is not a set of named nodes.`);
+      for (const [k, v] of Object.entries(o.children)) n.children.push(conv(v, `${path}/${k}`));
+    }
+    return n;
+  };
+  const r = conv(doc.root, 'root');
+  for (const c of pending) {
+    const t = byPath.get(c.to);
+    if (!t) throw new Error(`In this file, ${c.path} has a connector to ${c.to}, which is not in the map.`);
+    c.n.connectors.push({ to: t.id, label: c.label });
+  }
+  const half = Math.ceil(r.children.length / 2);
+  r.children.forEach((c, i) => c.side = i < half ? 'right' : 'left');
+  return r;
+}
+
+let toastTimer;
+function toast(text, isError = false) {
+  const t = $('#toast');
+  t.textContent = text; t.className = isError ? 'err' : ''; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 9000 : 4000);
+}
+function libsReady() {
+  if (window.jsyaml && window.JSZip) return true;
+  toast('Open and Save need an internet connection the first time the page loads. Reload the page and try again.', true);
+  return false;
+}
+
+// Inside Claude, files are offered through the downloads capability; elsewhere, an ordinary download.
+const downloadsP = window.claude?.use ? window.claude.use('downloads') : Promise.resolve(null);
+async function saveFile(name, blob) {
+  const downloads = await downloadsP;
+  if (downloads) {
+    try { await downloads.save({ filename: name, data: blob }); return true; }
+    catch (e) {
+      if (!(e && e.code === 'declined')) toast('Save failed: ' + (e && e.message || e), true);
+      return false;
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return true;
+}
+async function saveMap() {
+  if (!libsReady()) return;
+  if (editing) finishEdit(true);
+  const name = slug(root.title) || 'mindmap';
+  const zip = new JSZip();
+  zip.file(name + '.yaml', toYaml());
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  if (await saveFile(name + '.zip', blob)) toast(`Saved ${name}.zip.`);
+}
+async function openFile(file) {
+  if (!libsReady()) return;
+  try {
+    let text;
+    if (/\.ya?ml$/i.test(file.name)) text = await file.text();
+    else {
+      let zip;
+      try { zip = await JSZip.loadAsync(file); }
+      catch (e) { throw new Error(`${file.name} is not a .zip or .yaml file.`); }
+      const entry = Object.values(zip.files).find(f => !f.dir && /\.ya?ml$/i.test(f.name) && !f.name.startsWith('__MACOSX/'));
+      if (!entry) throw new Error(`${file.name} has no .yaml file in it.`);
+      text = await entry.async('string');
+    }
+    const r = fromYaml(text);
+    snapshot();
+    root = r; uid = maxId(root); sel = root; selConn = null; boxes = new Map();
+    changed();
+    toast(`Opened ${file.name}: ${countAll(root) + 1} nodes.`);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- help ---------- */
+function openHelp() { $('#dlg').hidden = false; $('#hClose').focus(); }
+function closeHelp() { $('#dlg').hidden = true; vp.focus({ preventScroll: true }); }
+
+/* ---------- events ---------- */
+$('#bChild').onclick = addChild;
+$('#bSib').onclick = addSibling;
+$('#bEdit').onclick = () => startEdit();
+$('#bFold').onclick = toggleFold;
+$('#bConnect').onclick = startConnect;
+$('#connDel').onclick = () => { if (currentConn()) delConn(); };
+$('#bDel').onclick = del;
+$('#bUndo').onclick = undo;
+$('#bRedo').onclick = redo;
+$('#bHelp').onclick = openHelp;
+$('#bSave').onclick = saveMap;
+$('#bOpen').onclick = () => $('#fileIn').click();
+$('#fileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); };
+const mainEl = document.querySelector('main');
+mainEl.addEventListener('dragover', e => { e.preventDefault(); mainEl.classList.add('drop'); });
+mainEl.addEventListener('dragleave', () => mainEl.classList.remove('drop'));
+mainEl.addEventListener('drop', e => {
+  e.preventDefault(); mainEl.classList.remove('drop');
+  const f = e.dataTransfer.files[0]; if (f) openFile(f);
+});
+$('#bNew').onclick = () => { snapshot(); uid = 0; root = mk('New mind map'); sel = root; selConn = null; cancelConnect(); boxes = new Map(); changed(); };
+$('#hClose').onclick = closeHelp;
+$('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeHelp(); });
+$('#dlg').addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
+
+let noteSnap = false;
+const ta = $('#note');
+ta.addEventListener('focus', () => { noteSnap = false; });
+ta.addEventListener('input', () => {
+  if (!noteSnap) { snapshot(); noteSnap = true; }
+  const had = !!(sel.note && sel.note.trim());
+  sel.note = ta.value; save();
+  if (had !== !!ta.value.trim()) render();
+  $('#bUndo').disabled = false;
+});
+
+const linkIn = $('#link');
+linkIn.addEventListener('change', () => {
+  let v = linkIn.value.trim();
+  if (v && !/^[a-z][a-z0-9+.-]*:/i.test(v)) v = 'https://' + v;
+  linkIn.value = v;
+  if (v === (sel.link || '')) return;
+  snapshot(); sel.link = v; changed();
+});
+linkIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); linkIn.blur(); vp.focus({ preventScroll: true }); } });
+
+let labelSnap = false;
+const labelIn = $('#connLabel');
+labelIn.addEventListener('focus', () => { labelSnap = false; });
+labelIn.addEventListener('input', () => {
+  const c = currentConn(); if (!c) return;
+  if (!labelSnap) { snapshot(); labelSnap = true; }
+  c.label = labelIn.value; save(); render();
+});
+labelIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); labelIn.blur(); vp.focus({ preventScroll: true }); } });
+
+stage.addEventListener('click', e => {
+  if (e.target.closest('a.li')) return;               // the link icon opens its page
+  const c = e.target.closest('.hit, .clabel');
+  if (c && !connectFrom) { vp.focus({ preventScroll: true }); selectConn(+c.dataset.from, +c.dataset.i); return; }
+  const el = e.target.closest('.node'); if (!el || editing) return;
+  const n = findById(root, +el.dataset.id);
+  if (document.activeElement && document.activeElement.matches('input, textarea')) vp.focus({ preventScroll: true });
+  if (connectFrom) { finishConnect(n); return; }
+  if (e.target.closest('.fold')) { select(n); toggleFold(); return; }
+  const now = Date.now();
+  if (lastTap.id === n.id && now - lastTap.t < 450) { lastTap = { id: 0, t: 0 }; select(n); startEdit(); return; }
+  lastTap = { id: n.id, t: now };
+  select(n);
+});
+let lastTap = { id: 0, t: 0 };
+
+vp.tabIndex = 0;
+document.addEventListener('keydown', e => {
+  if (editing || !$('#dlg').hidden) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) {
+    if (e.key === 'Escape') { a.blur(); vp.focus({ preventScroll: true }); }
+    return;
+  }
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (ctrl && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+  if (ctrl && e.key.toLowerCase() === 'k') { e.preventDefault(); if (selConn) select(sel); linkIn.focus(); linkIn.select(); return; }
+  if (e.key === 'Escape') { if (connectFrom) cancelConnect(); else if (selConn) select(sel); return; }
+  if (ctrl || e.altKey) return;
+  if (e.key === '?' || e.key === 'F1') { e.preventDefault(); openHelp(); return; }
+  if (a && a.tagName === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;
+  const map = {
+    Tab: addChild, Insert: addChild, Enter: addSibling, F2: () => startEdit(),
+    Delete: del, Backspace: del, ' ': toggleFold, c: startConnect, C: startConnect,
+  };
+  if (selConn && !['Delete', 'Backspace'].includes(e.key) && (map[e.key] || e.key.startsWith('Arrow'))) select(sel);
+  if (map[e.key]) { e.preventDefault(); map[e.key](); }
+  else if (e.key.startsWith('Arrow')) { e.preventDefault(); navigate(e.key); }
+});
+
+let pan = null;
+vp.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.closest('.node, .hit, .clabel')) return;
+  pan = { x: e.clientX, y: e.clientY, sl: vp.scrollLeft, st: vp.scrollTop };
+  vp.classList.add('panning'); vp.setPointerCapture(e.pointerId);
+});
+vp.addEventListener('pointermove', e => {
+  if (!pan) return;
+  vp.scrollLeft = pan.sl - (e.clientX - pan.x); vp.scrollTop = pan.st - (e.clientY - pan.y);
+});
+const endPan = () => { pan = null; vp.classList.remove('panning'); };
+vp.addEventListener('pointerup', endPan); vp.addEventListener('pointercancel', endPan);
+
+let rt, resizePending = false;
+addEventListener('resize', () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => { if (editing) resizePending = true; else render(); }, 120);
+});
+
+/* ---------- start ---------- */
+const stored = load();
+if (stored) { root = stored; uid = maxId(root); } else root = sample();
+sel = root; indexParents();
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { boxes = new Map(); render(); vp.focus({ preventScroll: true }); });
+render();
+</script>
+</body>
+</html>

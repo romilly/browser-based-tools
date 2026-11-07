@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Mind Map Schema",
+  "description": "Schema for Freeplane-compatible mind map YAML format",
+
+  "definitions": {
+    "node": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The display text for the node"
+        },
+        "note": {
+          "type": "string",
+          "description": "Rich text note attached to the node"
+        },
+        "link": {
+          "type": "string",
+          "description": "A web address (URL) attached to the node"
+        },
+        "connectors": {
+          "type": "array",
+          "description": "Arrows from this node to other nodes",
+          "items": {
+            "type": "object",
+            "required": ["to"],
+            "properties": {
+              "to": {
+                "type": "string",
+                "pattern": "^root(/[a-zA-Z0-9_]+)*$",
+                "description": "Path of the target node: 'root', then each child key in turn, separated by '/'"
+              },
+              "label": {
+                "type": "string",
+                "description": "Optional text shown on the connector"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "children": {
+          "type": "object",
+          "description": "Child nodes of this node",
+          "patternProperties": {
+            "^[a-zA-Z0-9_]+$": {
+              "$ref": "#/definitions/node"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+
+  "type": "object",
+  "required": ["root"],
+  "properties": {
+    "root": {
+      "allOf": [
+        { "$ref": "#/definitions/node" },
+        {
+          "required": ["children"],
+          "description": "The root node must have at least one child"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+
+  "examples": [
+    {
+      "root": {
+        "title": "Example Mind Map",
+        "note": "This is the root node",
+        "children": {
+          "topic1": {
+            "title": "First Topic",
+            "note": "Note for first topic",
+            "children": {
+              "subtopic1": {
+                "title": "Subtopic 1",
+                "note": "Note for subtopic"
+              }
+            }
+          },
+          "topic2": {
+            "title": "Second Topic",
+            "note": "Note for second topic"
+          }
+        }
+      }
+    }
+  ]
+}

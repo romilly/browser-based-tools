@@ -131,6 +131,16 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 .dlg-foot { display: flex; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
 .dlg-foot .spacer { flex: 1; }
 #help { width: min(640px, calc(100vw - 32px)); }
+dialog.wide { width: min(760px, calc(100vw - 32px)); }
+.csv-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.date-choice { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+.map-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 13px; }
+.map-list .muted { color: var(--muted); }
+.map-list code { font: 12.5px var(--font-code); }
+#import-preview { overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+#import-preview:empty { display: none; }
+#import-preview .grid td, #import-preview .grid th { cursor: default; }
+#import-preview .grid th { padding: 7px 12px; font-size: 13px; }
 .help-body { padding: 4px 20px 20px; line-height: 1.6; max-width: 65ch; }
 .help-body h3 { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 20px 0 6px; }
 .help-body p, .help-body ul { margin: 0 0 8px; }
@@ -170,6 +180,8 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
         <input type="search" id="search" placeholder="Search all columns" aria-label="Search records">
         <span class="count" id="count"></span>
         <span class="spacer"></span>
+        <button type="button" class="quiet" id="import-btn">Import CSV…</button>
+        <button type="button" class="quiet" id="export-btn">Export CSV</button>
         <button type="button" class="primary" id="new-record-btn">New record</button>
       </div>
       <div class="grid-wrap" id="grid"></div>
@@ -183,6 +195,13 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 
     <!-- Designer -->
     <form id="design-view" class="designer" hidden novalidate>
+      <div class="csv-line" id="d-csv">
+        <button type="button" class="quiet" id="d-from-csv">Start from CSV…</button>
+        <span class="hint" id="d-csv-info">Fills in the name and columns from a CSV file, and imports its rows when you create the table.</span>
+        <label class="date-choice" id="d-date-wrap" hidden>Dates in the file
+          <select id="d-date-format"></select>
+        </label>
+      </div>
       <label class="field">
         <span>Table name</span>
         <input type="text" id="d-name" class="code" autocomplete="off" spellcheck="false">
@@ -224,6 +243,25 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   </form>
 </dialog>
 
+<input type="file" id="csv-input" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" hidden>
+
+<dialog id="import-dlg" class="wide" aria-labelledby="import-title">
+  <div class="dlg-head"><h2 id="import-title">Import CSV</h2></div>
+  <div class="dlg-body">
+    <p class="hint" id="import-summary"></p>
+    <label class="date-choice" id="import-date-wrap">Dates in the file
+      <select id="import-date-format"></select>
+    </label>
+    <div id="import-columns"></div>
+    <div id="import-preview"></div>
+    <div class="error" id="import-problems" hidden></div>
+  </div>
+  <div class="dlg-foot">
+    <button type="button" class="primary" id="import-go">Import</button>
+    <button type="button" class="quiet" id="import-cancel">Cancel</button>
+  </div>
+</dialog>
+
 <dialog id="help" aria-labelledby="help-title">
   <div class="dlg-head">
     <h2 id="help-title">Using CRUDulator</h2>
@@ -247,6 +285,17 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
       <li>To turn an existing column into a link, open <b>Edit table design</b> and choose <b>Change to link → <i>table</i></b> in that column's type box. A text column is matched against the other table's first text column, for example issuer names against <code>Issuers.Name</code>; a number column is matched against its <code>id</code>. If any values have no match, you're told which, and nothing changes.</li>
       <li>In the list, a linked column shows the linked record's name; in the form it's a drop-down.</li>
       <li>Links are enforced: you can't delete a record while others still link to it.</li>
+    </ul>
+
+    <h3>CSV files</h3>
+    <ul>
+      <li><b>Export CSV</b> saves the whole table as a CSV file with a heading row. Linked columns are written as names (<code>Naxos</code>), Yes / No as <code>1</code> and <code>0</code>, and dates as <code>yyyy-mm-dd</code>.</li>
+      <li><b>Import CSV…</b> adds the rows of a CSV file to the current table. Headings are matched to column names (ignoring capitals); an <code>id</code> column is ignored, because new records are numbered automatically. You see which columns match and a preview before anything changes.</li>
+      <li>Values must suit their column: whole numbers, numbers, dates, and yes/no (<code>yes/no</code>, <code>true/false</code>, <code>y/n</code> or <code>1/0</code>). Linked columns can hold the linked record's name or its id.</li>
+      <li>Choose how dates are written in the file: <b>UK</b> (dd/mm/yyyy), <b>US</b> (mm/dd/yyyy) or <b>ISO only</b> (yyyy-mm-dd). ISO dates are accepted with any choice.</li>
+      <li>Import is all or nothing: if any row has a problem, you see a list of problems and nothing is added.</li>
+      <li>To make a new table from a CSV file, click <b>New table</b> then <b>Start from CSV…</b>. The name and columns are filled in with guessed types for you to check; creating the table imports the rows.</li>
+      <li>Files may use commas, semicolons or tabs. Files saved by older Windows Excel (not UTF-8) are read correctly too.</li>
     </ul>
 
     <h3>Working with records</h3>
@@ -299,6 +348,104 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     return 'TEXT';
   }
   const IDENT = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+  // ---------- CSV: reading, writing and converting values (no database access) ----------
+  // Bytes to text: UTF-8 if the bytes are valid UTF-8, otherwise Windows-1252 (older Excel on Windows).
+  function decodeText(bytes) {
+    try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'UTF-8' }; }
+    catch (_) { return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'Windows-1252' }; }
+  }
+  // The delimiter is whichever of comma, semicolon or tab appears most in the first line (outside quotes).
+  function detectDelimiter(text) {
+    const counts = { ',': 0, ';': 0, '\t': 0 };
+    let quoted = false;
+    for (const ch of text) {
+      if (ch === '"') quoted = !quoted;
+      else if (!quoted && (ch === '\n' || ch === '\r')) break;
+      else if (!quoted && ch in counts) counts[ch]++;
+    }
+    return Object.keys(counts).reduce((a, b) => counts[b] > counts[a] ? b : a, ',');
+  }
+  // RFC 4180-style parsing: quoted fields may contain the delimiter, line breaks and doubled quotes.
+  // Returns { rows: string[][], delimiter }. Blank lines are skipped.
+  function parseCSV(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    const d = detectDelimiter(text);
+    const rows = [];
+    let row = [], field = '', quoted = false, i = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      if (quoted) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          quoted = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      }
+      if (ch === '"' && field === '') { quoted = true; i++; continue; }
+      if (ch === d) { row.push(field); field = ''; i++; continue; }
+      if (ch === '\r' || ch === '\n') {
+        row.push(field); rows.push(row); row = []; field = '';
+        i += ch === '\r' && text[i + 1] === '\n' ? 2 : 1;
+        continue;
+      }
+      field += ch; i++;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return { rows: rows.filter(r => !(r.length === 1 && r[0].trim() === '')), delimiter: d };
+  }
+  function csvField(v) {
+    const s = v === null || v === undefined || v instanceof Uint8Array ? '' : String(v);
+    return /[",\r\n]|^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  // Rows to CSV text: UTF-8 with a byte-order mark (so Excel reads accents correctly) and CRLF line ends.
+  function toCSV(rows) { return '﻿' + rows.map(r => r.map(csvField).join(',')).join('\r\n') + '\r\n'; }
+
+  // Dates: ISO (yyyy-mm-dd) is always accepted; UK and US also accept d/m/yyyy or m/d/yyyy with / . or -.
+  const DATE_FORMATS = { UK: 'UK (dd/mm/yyyy)', US: 'US (mm/dd/yyyy)', ISO: 'ISO only (yyyy-mm-dd)' };
+  const ISO_DATE = /^(\d{4})-(\d{1,2})-(\d{1,2})$/, DMY_DATE = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/;
+  function isoDate(y, m, d) {
+    const t = new Date(Date.UTC(y, m - 1, d));
+    if (t.getUTCFullYear() !== y || t.getUTCMonth() !== m - 1 || t.getUTCDate() !== d) return null;   // e.g. 31/02
+    return String(y).padStart(4, '0') + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
+  function parseDate(s, format) {
+    let m = ISO_DATE.exec(s);
+    if (m) return isoDate(+m[1], +m[2], +m[3]);
+    m = format !== 'ISO' && DMY_DATE.exec(s);
+    if (!m) return null;
+    return format === 'US' ? isoDate(+m[3], +m[1], +m[2]) : isoDate(+m[3], +m[2], +m[1]);
+  }
+  // Pick a sensible starting choice from the date values in a file; the person can change it.
+  function detectDateFormat(values) {
+    const slashed = values.map(v => DMY_DATE.exec(v.trim())).filter(Boolean);
+    if (!slashed.length) return 'ISO';
+    if (slashed.some(m => +m[1] > 12)) return 'UK';
+    if (slashed.some(m => +m[2] > 12)) return 'US';
+    return 'UK';
+  }
+  const TRUE_WORDS = ['yes', 'y', 'true', '1'], FALSE_WORDS = ['no', 'n', 'false', '0'];
+  // Guess a column type from its values (used when starting a table from a CSV file).
+  function guessKind(values) {
+    const vals = values.map(v => v.trim()).filter(v => v !== '');
+    if (!vals.length) return 'TEXT';
+    if (vals.some(v => v.length > 100 || /[\r\n]/.test(v))) return 'LONGTEXT';
+    const leadingZero = v => /^[+-]?0\d/.test(v);                    // phone numbers, codes: keep as text
+    if (vals.every(v => /^[+-]?\d+$/.test(v) && !leadingZero(v))) return 'INTEGER';
+    if (vals.every(v => /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(v) && !leadingZero(v))) return 'REAL';
+    if (vals.every(v => ['yes', 'no', 'y', 'n', 'true', 'false'].includes(v.toLowerCase()))) return 'BOOLEAN';
+    if (vals.every(v => ISO_DATE.test(v) || DMY_DATE.test(v))) return 'DATE';
+    return 'TEXT';
+  }
+  // A CSV heading made into a valid column name: "CD Count" -> "CD_Count".
+  function identFrom(text, fallback) {
+    let s = String(text).trim().replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!s) s = fallback;
+    if (!/^[A-Za-z]/.test(s)) s = 'c_' + s;
+    return s;
+  }
+  // Exposed so the tests can check the pure CSV functions directly.
+  window.crudulator = { parseCSV, toCSV, decodeText, parseDate, detectDateFormat, guessKind, identFrom };
 
   let db = null, fileName = 'crud.db', isSample = false, dirty = false;
   let table = null, sort = { col: null, dir: 'ASC' }, search = '';
@@ -457,6 +604,13 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     if (action === 'drop') return 'This table can’t be deleted because records in other tables still link to it.';
     return 'One of the linked values doesn’t match a record in the linked table.';
   }
+  // SQL for a column as people see it: a linked column shows the linked record's label
+  // (falling back to the raw value if nothing matches).
+  function displayExpr(c, t) {
+    const own = qid(t) + '.' + qid(c.name);
+    if (!c.ref) return own;
+    return 'COALESCE((SELECT r.' + qid(c.ref.label) + ' FROM ' + qid(c.ref.table) + ' r WHERE r.' + qid(c.ref.col) + ' = ' + own + '), ' + own + ')';
+  }
 
   function refreshTables(select) {
     const tables = listTables();
@@ -480,10 +634,8 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   function renderGrid() {
     const grid = $('grid');
     const cols = getColumns(table);
-    // A linked column shows the linked record's label (falling back to the raw value if nothing matches).
     const T = qid(table);
-    const show = c => !c.ref ? T + '.' + qid(c.name)
-      : 'COALESCE((SELECT r.' + qid(c.ref.label) + ' FROM ' + qid(c.ref.table) + ' r WHERE r.' + qid(c.ref.col) + ' = ' + T + '.' + qid(c.name) + '), ' + T + '.' + qid(c.name) + ')';
+    const show = c => displayExpr(c, table);
     const params = [];
     let where = '';
     if (search) {
@@ -674,6 +826,35 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     return row;
   }
 
+  const CSV_HINT = $('d-csv-info').textContent;
+
+  // Fill the new-table designer from a CSV file: name from the file, columns from the headings,
+  // types guessed from the values. Each column row remembers which CSV column feeds it.
+  function startFromCsv(csv) {
+    design.csv = csv;
+    $('d-name').value = identFrom(csv.name.replace(/\.[^.]*$/, ''), 'imported');
+    $('d-cols').innerHTML = '';
+    const used = new Set(['id']);
+    const dateValues = [];
+    csv.header.forEach((h, i) => {
+      if (h.trim().toLowerCase() === 'id') return;          // the new table numbers its own records
+      const base = identFrom(h, 'column_' + (i + 1));
+      let name = base;
+      for (let n = 2; used.has(name.toLowerCase()); n++) name = base + '_' + n;
+      used.add(name.toLowerCase());
+      const values = csv.rows.map(r => r[i] ?? '');
+      const kind = guessKind(values);
+      if (kind === 'DATE') dateValues.push(...values);
+      addColRow(name, kind).dataset.csv = i;
+    });
+    if (!$('d-cols').childElementCount) addColRow();
+    fillDateSelect($('d-date-format'), detectDateFormat(dateValues));
+    $('d-date-wrap').hidden = false;
+    $('d-csv-info').textContent = csvSummary(csv) + ' Check the column types, then create the table to import the rows.';
+    $('d-error').hidden = true;
+    updateSql();
+  }
+
   function openDesigner(mode) {
     design = { mode, original: mode === 'edit' ? table : null, drop: new Set(), convert: new Map() };
     $('d-cols').innerHTML = '';
@@ -681,6 +862,9 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     $('d-alter-hint').hidden = mode !== 'edit';
     $('d-drop').hidden = mode !== 'edit';
     $('d-save').textContent = mode === 'edit' ? 'Save changes' : 'Create table';
+    $('d-csv').hidden = mode !== 'new';
+    $('d-date-wrap').hidden = true;
+    $('d-csv-info').textContent = CSV_HINT;
     if (mode === 'new') {
       $('d-name').value = '';
       addColRow();
@@ -726,6 +910,7 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
       name: r.querySelector('input[type=text]').value.trim(),
       kind: r.querySelector('select').value,
       required: r.querySelector('input[type=checkbox]').checked,
+      csv: r.dataset.csv === undefined ? null : Number(r.dataset.csv),
     }));
   }
 
@@ -827,6 +1012,8 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     $('d-sql').textContent = sql.length ? sql.join('\n') : nothing ? '-- No changes yet'
       : error ? error.split('\n').map(l => '-- ' + l.trim()).join('\n') : '-- Fill in the table name and columns';
     $('d-save').disabled = !!nothing;
+    if (design.mode === 'new')
+      $('d-save').textContent = design.csv ? 'Create table and import ' + design.csv.rows.length + ' row' + (design.csv.rows.length === 1 ? '' : 's') : 'Create table';
     if (!error) $('d-error').hidden = true;
   }
   $('design-view').addEventListener('input', updateSql);
@@ -843,6 +1030,14 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     try {
       db.exec('BEGIN');
       for (const s of sql) db.exec(s);
+      if (design.mode === 'new' && design.csv) {
+        // Import the file's rows into the table just created, in the same transaction.
+        const t = $('d-name').value.trim();
+        const mapping = newColumns().filter(c => c.name && c.csv !== null).map(c => ({ index: c.csv, col: c.name }));
+        const plan = planImport(t, design.csv, mapping, $('d-date-format').value);
+        if (plan.problems.length) throw new Error('Nothing was created, because some rows can’t be imported:\n' + describeProblems(plan.problems));
+        insertRecords(t, plan.cols, plan.records);
+      }
       if (rebuild && query('PRAGMA foreign_key_check').values.length)
         throw new Error('The change would leave some links pointing at records that don’t exist, so nothing was changed.');
       db.exec('COMMIT');
@@ -886,33 +1081,210 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   // Download: inside Claude use the downloads capability (zip, since .db isn't an allowed type);
   // anywhere else, an ordinary .db download.
   const downloadsP = window.claude?.use ? window.claude.use('downloads') : Promise.resolve(null);
-  $('save-btn').addEventListener('click', async () => {
-    const bytes = exportDb();
+  // Save a blob as a file. Returns false if the download was cancelled or failed.
+  async function saveFile(name, blob) {
     const downloads = await downloadsP;
     if (downloads) {
-      try {
-        const zip = new JSZip();
-        zip.file(fileName, bytes);
-        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-        await downloads.save({ filename: fileName.replace(/\.[^.]*$/, '') + '.zip', data: blob });
-      } catch (e) {
+      try { await downloads.save({ filename: name, data: blob }); return true; }
+      catch (e) {
         if (!(e && e.code === 'declined')) alert('Download failed: ' + (e && e.message || e));
-        return;
+        return false;
       }
-    } else {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.sqlite3' }));
-      a.download = fileName;
-      document.body.append(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    return true;
+  }
+  $('save-btn').addEventListener('click', async () => {
+    const bytes = exportDb();
+    let saved;
+    if (await downloadsP) {
+      const zip = new JSZip();
+      zip.file(fileName, bytes);
+      saved = await saveFile(fileName.replace(/\.[^.]*$/, '') + '.zip', await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }));
+    } else {
+      saved = await saveFile(fileName, new Blob([bytes], { type: 'application/vnd.sqlite3' }));
+    }
+    if (!saved) return;
     dirty = false; isSample = false; persist();
+  });
+
+  // ---------- CSV import and export ----------
+  $('export-btn').addEventListener('click', () => {
+    const cols = getColumns(table);
+    const res = query('SELECT ' + cols.map(c => displayExpr(c, table)).join(', ') + ' FROM ' + qid(table) + ' ORDER BY ' + qid(table) + '.rowid');
+    saveFile(table + '.csv', new Blob([toCSV([cols.map(c => c.name), ...res.values])], { type: 'text/csv;charset=utf-8' }));
+  });
+
+  // For a linked column: lower-cased label -> ids having that label, and the ids themselves.
+  function linkIndex(c) {
+    const byLabel = new Map(), ids = new Map();
+    for (const [id, label] of query('SELECT ' + qid(c.ref.col) + ', ' + qid(c.ref.label) + ' FROM ' + qid(c.ref.table)).values) {
+      ids.set(String(id), id);
+      if (label === null) continue;
+      const k = String(label).trim().toLowerCase();
+      byLabel.set(k, [...(byLabel.get(k) || []), id]);
+    }
+    return { byLabel, ids };
+  }
+  // Convert one CSV value for column c. Returns { value } or { error }.
+  function convertValue(raw, c, dateFormat, links) {
+    raw = raw === undefined ? '' : raw;
+    const s = raw.trim();
+    if (s === '') return c.notnull && c.dflt === null ? { error: 'a value is required' } : { value: null };
+    if (c.ref) {
+      const ids = links.byLabel.get(s.toLowerCase());
+      if (ids && ids.length === 1) return { value: ids[0] };
+      if (ids) return { error: 'more than one ' + c.ref.table + ' record is called “' + s + '”' };
+      if (links.ids.has(s)) return { value: links.ids.get(s) };
+      return { error: 'no ' + c.ref.table + ' record called “' + s + '”' };
+    }
+    switch (c.kind) {
+      case 'INTEGER':
+        return /^[+-]?\d+$/.test(s) ? { value: parseInt(s, 10) } : { error: '“' + s + '” isn’t a whole number' };
+      case 'REAL':
+        return /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s) ? { value: Number(s) } : { error: '“' + s + '” isn’t a number' };
+      case 'BOOLEAN': {
+        const w = s.toLowerCase();
+        return TRUE_WORDS.includes(w) ? { value: 1 } : FALSE_WORDS.includes(w) ? { value: 0 }
+          : { error: '“' + s + '” isn’t yes or no' };
+      }
+      case 'DATE': {
+        const d = parseDate(s, dateFormat);
+        return d ? { value: d } : { error: '“' + s + '” isn’t a valid ' + DATE_FORMATS[dateFormat].replace(/ only/, '') + ' date' };
+      }
+      default:
+        return { value: raw };
+    }
+  }
+  // Work out what importing would do: converted records plus a list of problems. Changes nothing.
+  // mapping: [{ index (CSV column), col (table column name) }]
+  function planImport(t, csv, mapping, dateFormat) {
+    const all = getColumns(t);
+    const cols = mapping.map(m => all.find(c => c.name === m.col));
+    const problems = [];
+    if (!csv.rows.length) problems.push({ msg: 'The file has headings but no rows.' });
+    if (!mapping.length) problems.push({ msg: 'None of the headings match a column in ' + t + '.' });
+    for (const c of all)
+      if (!c.auto && !cols.includes(c) && c.notnull && c.dflt === null)
+        problems.push({ msg: c.name + ' is required, but the file has no heading for it.' });
+    const links = new Map(cols.filter(c => c.ref).map(c => [c.name, linkIndex(c)]));
+    const records = csv.rows.map((r, i) => {
+      const row = i + 2;   // as in a spreadsheet, where the headings are row 1
+      if (r.length > csv.header.length && r.slice(csv.header.length).some(v => v.trim() !== ''))
+        problems.push({ row, msg: 'has more values than there are headings' });
+      return mapping.map((m, j) => {
+        const res = convertValue(r[m.index], cols[j], dateFormat, links.get(cols[j].name));
+        if ('error' in res) problems.push({ row, col: m.col, msg: res.error });
+        return res.value;
+      });
+    });
+    return { cols, records, problems };
+  }
+  function describeProblems(problems) {
+    const lines = problems.slice(0, 10).map(p => p.row ? 'Row ' + p.row + (p.col ? ', ' + p.col : '') + ': ' + p.msg : p.msg);
+    if (problems.length > 10) lines.push('…and ' + (problems.length - 10) + ' more.');
+    return lines.join('\n');
+  }
+  function insertRecords(t, cols, records) {
+    const stmt = db.prepare('INSERT INTO ' + qid(t) + ' (' + cols.map(c => qid(c.name)).join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')');
+    try { for (const r of records) stmt.run(r); }
+    finally { stmt.free(); }
+  }
+  function fillDateSelect(sel, chosen) {
+    sel.innerHTML = Object.entries(DATE_FORMATS).map(([k, label]) => '<option value="' + k + '"' + (k === chosen ? ' selected' : '') + '>' + label + '</option>').join('');
+  }
+  function csvSummary(csv) {
+    const sep = { ',': 'commas', ';': 'semicolons', '\t': 'tabs' }[csv.delimiter];
+    return csv.name + ': ' + csv.rows.length + ' row' + (csv.rows.length === 1 ? '' : 's') + ', separated by ' + sep +
+      (csv.encoding === 'UTF-8' ? '.' : '. The file isn’t UTF-8, so it was read as ' + csv.encoding + ' (Windows Excel).');
+  }
+
+  async function readCsvFile(file) {
+    const { text, encoding } = decodeText(new Uint8Array(await file.arrayBuffer()));
+    const { rows, delimiter } = parseCSV(text);
+    if (!rows.length) { alert(file.name + ' is empty.'); return null; }
+    return { name: file.name, header: rows[0], rows: rows.slice(1), delimiter, encoding };
+  }
+  let csvTarget = null;   // 'import' (into the current table) or 'design' (start a new table)
+  $('import-btn').addEventListener('click', () => { csvTarget = 'import'; $('csv-input').click(); });
+  $('d-from-csv').addEventListener('click', () => { csvTarget = 'design'; $('csv-input').click(); });
+  $('csv-input').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const csv = await readCsvFile(file);
+    if (csv) csvTarget === 'design' ? startFromCsv(csv) : openImport(csv);
+  });
+
+  // Import into the current table: match headings to columns, preview, check, then append.
+  const importDlg = $('import-dlg');
+  let importing = null;
+  function openImport(csv) {
+    const cols = getColumns(table);
+    const mapping = [], notes = [];
+    csv.header.forEach((h, i) => {
+      const heading = h.trim(), c = cols.find(c => c.name.toLowerCase() === heading.toLowerCase());
+      const shown = heading ? '<code>' + esc(heading) + '</code>' : 'blank heading (column ' + (i + 1) + ')';
+      if (!c) notes.push('<li class="muted">✕ ' + shown + ' — no such column, ignored</li>');
+      else if (c.auto) notes.push('<li class="muted">✕ ' + shown + ' — ignored; new records are numbered automatically</li>');
+      else if (mapping.some(m => m.col === c.name)) notes.push('<li class="muted">✕ ' + shown + ' — appears twice, second one ignored</li>');
+      else mapping.push({ index: i, col: c.name });
+    });
+    const matched = mapping.map(m => '<li>✓ <code>' + esc(csv.header[m.index].trim()) + '</code> → ' + esc(m.col) + '</li>');
+    const empty = cols.filter(c => !c.auto && !mapping.some(m => m.col === c.name))
+      .map(c => '<li class="muted">– ' + esc(c.name) + ' — not in the file, left empty</li>');
+    $('import-columns').innerHTML = '<ul class="map-list">' + [...matched, ...notes, ...empty].join('') + '</ul>';
+
+    const dateCols = mapping.filter(m => { const c = cols.find(c => c.name === m.col); return c.kind === 'DATE' && !c.ref; });
+    fillDateSelect($('import-date-format'), detectDateFormat(dateCols.flatMap(m => csv.rows.map(r => r[m.index] || ''))));
+    $('import-date-wrap').hidden = !dateCols.length;
+
+    const sample = csv.rows.slice(0, 5);
+    $('import-preview').innerHTML = mapping.length && sample.length
+      ? '<table class="grid"><thead><tr>' + mapping.map(m => '<th>' + esc(m.col) + '</th>').join('') + '</tr></thead><tbody>' +
+        sample.map(r => '<tr>' + mapping.map(m => '<td>' + esc(r[m.index] ?? '') + '</td>').join('') + '</tr>').join('') + '</tbody></table>'
+      : '';
+    $('import-title').textContent = 'Import into ' + table;
+    $('import-summary').textContent = csvSummary(csv) + (csv.rows.length > 5 ? ' The first 5 are shown.' : '');
+    importing = { csv, mapping };
+    checkImport();
+    importDlg.showModal();
+  }
+  function checkImport() {
+    const plan = planImport(table, importing.csv, importing.mapping, $('import-date-format').value);
+    importing.plan = plan;
+    $('import-problems').hidden = !plan.problems.length;
+    $('import-problems').textContent = plan.problems.length ? 'Nothing can be imported until these are fixed:\n' + describeProblems(plan.problems) : '';
+    $('import-go').disabled = plan.problems.length > 0;
+    $('import-go').textContent = 'Import ' + plan.records.length + ' record' + (plan.records.length === 1 ? '' : 's');
+  }
+  $('import-date-format').addEventListener('change', checkImport);
+  $('import-cancel').addEventListener('click', () => importDlg.close());
+  $('import-go').addEventListener('click', () => {
+    const { cols, records } = importing.plan;
+    try {
+      db.exec('BEGIN');
+      insertRecords(table, cols, records);
+      db.exec('COMMIT');
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch (_) {}
+      $('import-problems').textContent = 'Nothing was imported: ' + friendlyError(err, 'save');
+      $('import-problems').hidden = false;
+      return;
+    }
+    importDlg.close();
+    markDirty();
+    renderGrid();
   });
 
   const helpDlg = $('help');
   $('help-btn').addEventListener('click', () => helpDlg.showModal());
   $('help-close').addEventListener('click', () => helpDlg.close());
-  for (const d of [helpDlg, recordDlg]) d.addEventListener('click', e => { if (e.target === d) d.close(); });
+  for (const d of [helpDlg, recordDlg, importDlg]) d.addEventListener('click', e => { if (e.target === d) d.close(); });
 
   // ---------- sample database so the page opens in a working state ----------
   const sample = new SQL.Database();

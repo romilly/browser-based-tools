@@ -1,2 +1,4 @@
 # Tools for running the browser tests in tests/
 pytest-playwright
+pyyaml
+jsonschema
