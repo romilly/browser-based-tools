@@ -26,6 +26,7 @@ Design a SQLite table and get a simple data-entry application for it: list, sear
 - **Change a design:** rename the table, add or remove columns, or delete the table.
 - **Link tables (foreign keys):** a column can link to a record in another table. Linked columns show the other record's name in the list and a drop-down in the form, and links are enforced. An existing column can be converted into a link: text values are matched by name, and anything without a match is reported before any change is made.
 - **Work with records:** a sortable, searchable list. Click a row to edit or delete it; forms use the right input for each type.
+- **CSV import and export:** export a whole table as CSV (linked columns as names). Import a CSV into a table, with headings matched to columns, a preview, a choice of UK, US or ISO dates, and a list of any problems; the import is all or nothing. **Start from CSV…** in the table designer creates a new table with column types guessed from the file and imports its rows. Comma, semicolon and tab separated files work, including ones saved by older Windows Excel.
 - **Open existing databases:** any SQLite file works, and you can pick which of its tables to work with.
 - **Name your database:** **New database** asks for a file name, and you can rename it by clicking the name in the header.
 - **Remembered between visits:** every change is saved in the browser (IndexedDB) and the database reopens next time. The browser keeps one database at a time and clearing site data deletes it, so **Download database** is still your real backup.

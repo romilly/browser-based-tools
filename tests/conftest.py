@@ -151,6 +151,50 @@ class App:
         d.value.save_as(path)
         return path
 
+    # --- CSV ---
+    def js(self, name, *args):
+        """Call one of the page's pure CSV functions (window.crudulator.<name>)."""
+        return self.page.evaluate('([name, args]) => window.crudulator[name](...args)', [name, list(args)])
+
+    def _choose_file(self, button, path):
+        with self.page.expect_file_chooser() as chooser:
+            self.page.click(button)
+        chooser.value.set_files(str(path))
+
+    def export_csv(self, folder):
+        with self.page.expect_download() as d:
+            self.page.click('#export-btn')
+        path = Path(folder) / d.value.suggested_filename
+        d.value.save_as(path)
+        return path
+
+    def import_csv(self, path):
+        """Choose a CSV file for the current table; leaves the import dialog open."""
+        self._choose_file('#import-btn', path)
+        self.page.wait_for_selector('#import-dlg[open]')
+
+    def import_problems(self):
+        el = self.page.locator('#import-problems')
+        return el.inner_text() if el.is_visible() else ''
+
+    def import_button(self):
+        return self.page.locator('#import-go')
+
+    def confirm_import(self):
+        self.page.click('#import-go')
+
+    def start_from_csv(self, path):
+        self.page.click('#new-table-btn')
+        self._choose_file('#d-from-csv', path)
+        self.page.wait_for_function(
+            "name => document.querySelector('#d-csv-info').innerText.includes(name)", arg=Path(path).name)
+
+    def designer_columns(self):
+        """[(name, type value)] for the new-column rows in the designer."""
+        rows = self.page.locator('#d-cols .col-row:not(.fixed)')
+        return [(rows.nth(i).locator('input[type=text]').input_value(), rows.nth(i).locator('select').input_value())
+                for i in range(rows.count())]
+
     # --- designer ---
     def new_table(self, name, *columns):
         """columns: (name, type_value, required) tuples; type_value as in the Type box, e.g. 'INTEGER' or 'REF:cds'."""
