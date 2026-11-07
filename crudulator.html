@@ -88,6 +88,8 @@ table.grid { border-collapse: collapse; font-variant-numeric: tabular-nums; widt
 .grid th button { all: unset; display: block; padding: 7px 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
 .grid th button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .grid th .arrow { color: var(--accent); margin-left: 4px; }
+.grid th .link-to, .col-row .link-to { font-weight: 400; color: var(--muted); font-size: 12px; }
+.dlg-body .field select { width: 100%; }
 .grid td.num { text-align: right; font-family: var(--font-code); font-size: 13px; }
 .grid td.null { color: var(--null); }
 .grid tbody tr { cursor: pointer; }
@@ -233,10 +235,18 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     <h3>Designing a table</h3>
     <ul>
       <li>Click <b>New table</b>, give it a name, and add columns. Each column has a type and can be marked <b>Required</b>.</li>
-      <li>Types: <b>Text</b>, <b>Long text</b> (a multi-line box), <b>Whole number</b>, <b>Decimal number</b>, <b>Date</b> and <b>Yes / No</b>.</li>
+      <li>Types: <b>Text</b>, <b>Long text</b> (a multi-line box), <b>Whole number</b>, <b>Decimal number</b>, <b>Date</b>, <b>Yes / No</b>, and <b>Link to</b> another table.</li>
       <li>An <code>id</code> column is added for you and numbered automatically.</li>
       <li>The SQL that will run is shown before you save it.</li>
       <li><b>Edit table design</b> lets you rename a table, add columns, remove columns or delete the whole table.</li>
+    </ul>
+
+    <h3>Linking tables</h3>
+    <ul>
+      <li>A column can <b>link</b> to a record in another table (a foreign key). For a new column, choose <b>Link to <i>table</i></b> as its type.</li>
+      <li>To turn an existing column into a link, open <b>Edit table design</b> and choose <b>Change to link → <i>table</i></b> in that column's type box. A text column is matched against the other table's first text column, for example issuer names against <code>Issuers.Name</code>; a number column is matched against its <code>id</code>. If any values have no match, you're told which, and nothing changes.</li>
+      <li>In the list, a linked column shows the linked record's name; in the form it's a drop-down.</li>
+      <li>Links are enforced: you can't delete a record while others still link to it.</li>
     </ul>
 
     <h3>Working with records</h3>
@@ -328,27 +338,33 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   })();
   let browserSaved = false;   // true once the current state is safely in IndexedDB
   async function persist() {
-    browserSaved = false;
+    showFileInfo();   // show the new name or status at once; the save itself takes a moment
     try {
-      await store.save({ name: fileName, bytes: db.export(), dirty, savedAt: Date.now() });
+      await store.save({ name: fileName, bytes: exportDb(), dirty, savedAt: Date.now() });
       browserSaved = true;
     } catch (e) {
+      browserSaved = false;
       console.warn('Could not save in the browser:', e);
     }
     showFileInfo();
   }
 
   // ---------- database lifecycle ----------
+  // SQLite only enforces links (foreign keys) when asked, per connection.
+  function enforceLinks() { db.exec('PRAGMA foreign_keys = ON'); }
+  // sql.js's export() closes and reopens the database, which resets that setting, so restore it.
+  function exportDb() { const bytes = db.export(); enforceLinks(); return bytes; }
   function setDb(next, name, sample, wasDirty = false) {
     if (db) db.close();
     db = next; fileName = name; isSample = sample; dirty = wasDirty;
+    enforceLinks();
     table = null; sort = { col: null, dir: 'ASC' }; search = ''; $('search').value = '';
     showFileInfo();
     refreshTables();
   }
   function markDirty() { dirty = true; persist(); }
   function showFileInfo() {
-    const size = fmtBytes(db.export().length);
+    const size = fmtBytes(exportDb().length);
     $('file-info').innerHTML = '<button type="button" class="name-btn" id="name-btn" title="Rename the database file">' +
       esc(fileName) + ' <span aria-hidden="true">✎</span></button> · ' + size +
       (browserSaved ? ' · saved in this browser' : '') +
@@ -395,13 +411,51 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   function listTables() {
     return query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").values.map(r => r[0]);
   }
-  function getColumns(t) {
+  function realTableName(t) { return listTables().find(x => x.toLowerCase() === String(t).toLowerCase()) || null; }
+  function baseColumns(t) {
     const cols = query('PRAGMA table_info(' + qid(t) + ')').values.map(([, name, decl, notnull, dflt, pk]) =>
-      ({ name, decl, kind: kindOf(decl), notnull: !!notnull, dflt, pk: !!pk }));
+      ({ name, decl, kind: kindOf(decl), notnull: !!notnull, dflt, pk: !!pk, pkPos: pk, ref: null }));
     const pks = cols.filter(c => c.pk);
     // A single INTEGER PRIMARY KEY is SQLite's rowid: numbered automatically, so the form leaves it out.
     for (const c of cols) c.auto = pks.length === 1 && c.pk && (c.decl || '').toUpperCase() === 'INTEGER';
     return cols;
+  }
+  // The auto-numbered key of a table, or null. Only tables with one can be linked to from the designer.
+  function autoKey(t) { const c = baseColumns(t).find(c => c.auto); return c ? c.name : null; }
+  function singleKey(t) { const pks = baseColumns(t).filter(c => c.pk); return pks.length === 1 ? pks[0].name : null; }
+  // The column shown in place of a link: the table's first text column, else its key.
+  function labelColumn(t) {
+    const cols = baseColumns(t);
+    return (cols.find(c => !c.pk && (c.kind === 'TEXT' || c.kind === 'LONGTEXT')) || cols.find(c => c.pk) || cols[0]).name;
+  }
+  // Tables a column can be linked to (excluding `except`).
+  function linkTargets(except) {
+    return listTables().filter(t => t.toLowerCase() !== String(except || '').toLowerCase() && autoKey(t));
+  }
+  function getColumns(t) {
+    const cols = baseColumns(t);
+    // Single-column foreign keys become links: c.ref = { table, col, label }.
+    const fks = query('PRAGMA foreign_key_list(' + qid(t) + ')').values; // id, seq, table, from, to, ...
+    for (const [id, , refTable, from, to] of fks) {
+      if (fks.filter(f => f[0] === id).length !== 1) continue;      // composite keys: shown as plain columns
+      const target = realTableName(refTable);
+      const c = cols.find(c => c.name === from);
+      if (!target || !c) continue;
+      const col = to || singleKey(target);
+      if (col) c.ref = { table: target, col, label: labelColumn(target) };
+    }
+    return cols;
+  }
+  // Turn SQLite's constraint errors into something a person can act on.
+  function friendlyError(err, action) {
+    const msg = String(err && err.message || err);
+    if (!/FOREIGN KEY constraint failed/i.test(msg)) return msg;
+    if (action === 'delete') {
+      const users = listTables().filter(t => getColumns(t).some(c => c.ref && c.ref.table.toLowerCase() === table.toLowerCase()));
+      return 'This record can’t be deleted because records in ' + (users.join(', ') || 'another table') + ' still link to it. Change or delete those first.';
+    }
+    if (action === 'drop') return 'This table can’t be deleted because records in other tables still link to it.';
+    return 'One of the linked values doesn’t match a record in the linked table.';
   }
 
   function refreshTables(select) {
@@ -426,17 +480,22 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   function renderGrid() {
     const grid = $('grid');
     const cols = getColumns(table);
+    // A linked column shows the linked record's label (falling back to the raw value if nothing matches).
+    const T = qid(table);
+    const show = c => !c.ref ? T + '.' + qid(c.name)
+      : 'COALESCE((SELECT r.' + qid(c.ref.label) + ' FROM ' + qid(c.ref.table) + ' r WHERE r.' + qid(c.ref.col) + ' = ' + T + '.' + qid(c.name) + '), ' + T + '.' + qid(c.name) + ')';
     const params = [];
     let where = '';
     if (search) {
-      where = ' WHERE ' + cols.map(c => 'CAST(' + qid(c.name) + ' AS TEXT) LIKE ?').join(' OR ');
+      where = ' WHERE ' + cols.map(c => 'CAST(' + show(c) + ' AS TEXT) LIKE ?').join(' OR ');
       for (const _ of cols) params.push('%' + search + '%');
     }
-    const order = sort.col ? ' ORDER BY ' + qid(sort.col) + ' ' + sort.dir : ' ORDER BY rowid';
+    const sortCol = cols.find(c => c.name === sort.col);
+    const order = sortCol ? ' ORDER BY ' + show(sortCol) + ' ' + sort.dir : ' ORDER BY ' + T + '.rowid';
     let total, res;
     try {
-      total = query('SELECT count(*) FROM ' + qid(table) + where, params).values[0][0];
-      res = query('SELECT rowid AS __rowid__, * FROM ' + qid(table) + where + order + ' LIMIT 500', params);
+      total = query('SELECT count(*) FROM ' + T + where, params).values[0][0];
+      res = query('SELECT ' + T + '.rowid AS __rowid__, ' + cols.map(show).join(', ') + ' FROM ' + T + where + order + ' LIMIT 500', params);
     } catch (e) {
       grid.innerHTML = '<div class="note error" style="margin:14px">' + esc(e.message) + '</div>';
       $('count').textContent = '';
@@ -454,12 +513,14 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     let html = '<table class="grid"><thead><tr>' + cols.map(c => {
       const arrow = sort.col === c.name ? '<span class="arrow">' + (sort.dir === 'ASC' ? '▲' : '▼') + '</span>' : '';
       const ariaSort = sort.col === c.name ? ' aria-sort="' + (sort.dir === 'ASC' ? 'ascending' : 'descending') + '"' : '';
-      return '<th' + ariaSort + '><button type="button" data-sort="' + esc(c.name) + '">' + esc(c.name) + arrow + '</button></th>';
+      const link = c.ref ? ' <span class="link-to">→ ' + esc(c.ref.table) + '</span>' : '';
+      return '<th' + ariaSort + '><button type="button" data-sort="' + esc(c.name) + '">' + esc(c.name) + link + arrow + '</button></th>';
     }).join('') + '</tr></thead><tbody>';
     for (const row of res.values) {
       html += '<tr tabindex="0" data-rowid="' + row[0] + '">' + cols.map((c, i) => {
         const v = row[i + 1];
         if (v === null) return '<td class="null"></td>';
+        if (c.ref) return '<td title="' + esc(v) + '">' + esc(v) + '</td>';
         if (c.kind === 'BOOLEAN') return '<td>' + (Number(v) ? 'Yes' : 'No') + '</td>';
         if (v instanceof Uint8Array) return '<td class="null">BLOB ' + v.length + ' B</td>';
         if (typeof v === 'number') return '<td class="num">' + v + '</td>';
@@ -520,7 +581,17 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
       const required = c.notnull && c.dflt === null && c.kind !== 'BOOLEAN';
       const label = esc(c.name) + (required ? ' <span class="req-mark" aria-hidden="true">*</span>' : '');
       let html;
-      if (c.kind === 'BOOLEAN') {
+      if (c.ref) {
+        const opts = query('SELECT ' + qid(c.ref.col) + ', ' + qid(c.ref.label) + ' FROM ' + qid(c.ref.table) +
+          ' ORDER BY ' + qid(c.ref.label) + ' COLLATE NOCASE').values;
+        let options = '<option value="">' + (required ? 'Choose…' : '(none)') + '</option>' +
+          opts.map(([k, l]) => '<option value="' + esc(k) + '"' + (v !== null && v !== undefined && String(k) === String(v) ? ' selected' : '') + '>' + esc(l ?? k) + '</option>').join('');
+        if (v !== null && v !== undefined && !opts.some(([k]) => String(k) === String(v)))
+          options += '<option value="' + esc(v) + '" selected>' + esc(v) + ' (not found in ' + esc(c.ref.table) + ')</option>';
+        html = '<label class="field"><span>' + label + ' <span class="link-to">→ ' + esc(c.ref.table) + '</span></span><select id="' + id + '"' +
+          (required ? ' required' : '') + '>' + options + '</select>' +
+          (opts.length ? '' : '<span class="hint">' + esc(c.ref.table) + ' has no records yet. Add some there first.</span>') + '</label>';
+      } else if (c.kind === 'BOOLEAN') {
         html = '<label class="check"><input type="checkbox" id="' + id + '"' + (Number(v) ? ' checked' : '') + '> ' + esc(c.name) + '</label>';
       } else if (c.kind === 'LONGTEXT') {
         html = '<label class="field"><span>' + label + '</span><textarea id="' + id + '"' + (required ? ' required' : '') + '>' + esc(v ?? '') + '</textarea></label>';
@@ -531,17 +602,19 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
           (required ? ' required' : '') + ' value="' + esc(v ?? '') + '"' + (type === 'number' ? ' class="code"' : '') + '></label>';
       }
       box.insertAdjacentHTML('beforeend', html);
-      box.lastElementChild.querySelector('input,textarea').dataset.col = c.name;
+      box.lastElementChild.querySelector('input,textarea,select').dataset.col = c.name;
     });
     if (!box.childElementCount) box.innerHTML = '<p class="hint">This table has no columns to fill in.</p>';
     recordDlg.showModal();
-    box.querySelector('input,textarea')?.focus();
+    box.querySelector('input,textarea,select')?.focus();
   }
 
-  function readField(el, kind) {
-    if (kind === 'BOOLEAN') return el.checked ? 1 : 0;
+  function readField(el, c) {
+    const kind = c.kind;
+    if (kind === 'BOOLEAN' && !c.ref) return el.checked ? 1 : 0;
     const s = el.value.trim();
     if (s === '') return null;
+    if (c.ref) { const n = Number(s); return Number.isInteger(n) && String(n) === s ? n : s; }
     if (kind === 'INTEGER') return parseInt(s, 10);
     if (kind === 'REAL') return parseFloat(s);
     return s;
@@ -554,7 +627,7 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     const names = [], vals = [];
     for (const el of $('record-fields').querySelectorAll('[data-col]')) {
       const c = cols.find(c => c.name === el.dataset.col);
-      names.push(c.name); vals.push(readField(el, c.kind));
+      names.push(c.name); vals.push(readField(el, c));
     }
     try {
       if (editingRowid === null) {
@@ -565,7 +638,7 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
         db.run('UPDATE ' + qid(table) + ' SET ' + names.map(n => qid(n) + ' = ?').join(', ') + ' WHERE rowid = ?', [...vals, editingRowid]);
       }
     } catch (err) {
-      $('record-error').textContent = err.message; $('record-error').hidden = false;
+      $('record-error').textContent = friendlyError(err, 'save'); $('record-error').hidden = false;
       return;
     }
     recordDlg.close(); markDirty(); renderGrid();
@@ -574,7 +647,7 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   $('record-delete').addEventListener('click', () => {
     if (!confirm('Delete this record? This can’t be undone.')) return;
     try { db.run('DELETE FROM ' + qid(table) + ' WHERE rowid = ?', [editingRowid]); }
-    catch (err) { $('record-error').textContent = err.message; $('record-error').hidden = false; return; }
+    catch (err) { $('record-error').textContent = friendlyError(err, 'delete'); $('record-error').hidden = false; return; }
     recordDlg.close(); markDirty(); renderGrid();
   });
   $('new-record-btn').addEventListener('click', () => openRecord(null));
@@ -583,14 +656,16 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   // mode 'new': CREATE TABLE. mode 'edit': rename, add columns, drop columns, or delete the table.
   let design = null;
 
-  function typeOptions(selected) {
-    return TYPES.map(t => '<option value="' + t.key + '"' + (t.key === selected ? ' selected' : '') + '>' + t.label + '</option>').join('');
+  // Plain types, then one "Link to X" per table that has an auto-numbered id. Link values are 'REF:<table>'.
+  function typeOptions(selected, except) {
+    return TYPES.map(t => '<option value="' + t.key + '"' + (t.key === selected ? ' selected' : '') + '>' + t.label + '</option>').join('') +
+      linkTargets(except).map(t => '<option value="REF:' + esc(t) + '">Link to ' + esc(t) + '</option>').join('');
   }
   function addColRow(name = '', kind = 'TEXT', required = false) {
     const row = document.createElement('div');
     row.className = 'col-row';
     row.innerHTML = '<input type="text" class="code" placeholder="column_name" aria-label="Column name" autocomplete="off" spellcheck="false">' +
-      '<select aria-label="Column type">' + typeOptions(kind) + '</select>' +
+      '<select aria-label="Column type">' + typeOptions(kind, design.original) + '</select>' +
       '<input type="checkbox" aria-label="Required"' + (required ? ' checked' : '') + (design.mode === 'edit' ? ' disabled' : '') + '>' +
       '<button type="button" class="icon" aria-label="Remove column">✕</button>';
     row.querySelector('input').value = name;
@@ -600,7 +675,7 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   }
 
   function openDesigner(mode) {
-    design = { mode, original: mode === 'edit' ? table : null, drop: new Set() };
+    design = { mode, original: mode === 'edit' ? table : null, drop: new Set(), convert: new Map() };
     $('d-cols').innerHTML = '';
     $('d-error').hidden = true;
     $('d-alter-hint').hidden = mode !== 'edit';
@@ -614,9 +689,21 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
       for (const c of getColumns(table)) {
         const row = document.createElement('div');
         row.className = 'col-row fixed';
-        row.innerHTML = '<span>' + esc(c.name) + '</span><span>' + (c.auto ? 'Auto number' : typeLabel(c.kind)) + '</span>' +
+        // An existing text or number column can be changed into a link to another table.
+        const targets = linkTargets(table);
+        const convertible = !c.pk && !c.ref && ['TEXT', 'LONGTEXT', 'INTEGER'].includes(c.kind) && targets.length;
+        const typeCell = c.auto ? '<span>Auto number</span>'
+          : c.ref ? '<span>Link to ' + esc(c.ref.table) + '</span>'
+          : convertible ? '<select class="keep" aria-label="Type of ' + esc(c.name) + '"><option value="">' + typeLabel(c.kind) + '</option>' +
+              targets.map(t => '<option value="' + esc(t) + '">Change to link → ' + esc(t) + '</option>').join('') + '</select>'
+          : '<span>' + typeLabel(c.kind) + '</span>';
+        row.innerHTML = '<span>' + esc(c.name) + '</span>' + typeCell +
           '<span class="req">' + (c.notnull && !c.pk ? '✓' : '') + '</span>' +
           (c.pk ? '<span></span>' : '<button type="button" class="icon" aria-label="Remove column ' + esc(c.name) + '">✕</button>');
+        row.querySelector('select')?.addEventListener('change', e => {
+          e.target.value ? design.convert.set(c.name, e.target.value) : design.convert.delete(c.name);
+          updateSql();
+        });
         const btn = row.querySelector('button');
         if (btn) btn.addEventListener('click', () => {
           const dropping = design.drop.has(c.name);
@@ -660,25 +747,85 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
       if (taken.includes(c.name.toLowerCase())) return { sql: stmts, error: 'There is more than one column called ' + c.name + '.' };
       taken.push(c.name.toLowerCase());
     }
-    const colDef = c => qid(c.name) + ' ' + c.kind + (c.required ? ' NOT NULL' : '');
+    const colDef = c => {
+      if (c.kind.startsWith('REF:')) {
+        const target = c.kind.slice(4);
+        return qid(c.name) + ' INTEGER' + (c.required ? ' NOT NULL' : '') + ' REFERENCES ' + qid(target) + '(' + qid(autoKey(target)) + ')';
+      }
+      return qid(c.name) + ' ' + c.kind + (c.required ? ' NOT NULL' : '');
+    };
 
     if (design.mode === 'new') {
       if (!cols.length) return { sql: stmts, error: 'Add at least one column.' };
       stmts.push('CREATE TABLE ' + qid(name) + ' (\n  "id" INTEGER PRIMARY KEY' + cols.map(c => ',\n  ' + colDef(c)).join('') + '\n);');
-    } else {
-      const t = qid(design.original);
-      if (renaming) stmts.push('ALTER TABLE ' + t + ' RENAME TO ' + qid(name) + ';');
+      return { sql: stmts, error: null };
+    }
+
+    const orig = design.original, O = qid(orig);
+    const current = getColumns(orig);
+    const kept = current.filter(c => !design.drop.has(c.name));
+    const convert = new Map([...design.convert].filter(([n]) => !design.drop.has(n)));
+    // SQLite can't add a foreign key to an existing column, or drop a column that is one,
+    // so those changes rebuild the table: create a new one, copy the rows, swap it in.
+    const rebuild = convert.size > 0 || current.some(c => design.drop.has(c.name) && c.ref);
+
+    if (!rebuild) {
+      if (renaming) stmts.push('ALTER TABLE ' + O + ' RENAME TO ' + qid(name) + ';');
       const tt = qid(name);
       for (const d of design.drop) stmts.push('ALTER TABLE ' + tt + ' DROP COLUMN ' + qid(d) + ';');
       for (const c of cols) stmts.push('ALTER TABLE ' + tt + ' ADD COLUMN ' + colDef({ ...c, required: false }) + ';');
       if (!stmts.length) return { sql: stmts, error: null, nothing: true };
+      return { sql: stmts, error: null };
     }
-    return { sql: stmts, error: null };
+
+    // Every existing value in a converted column must match a record in the target table.
+    for (const [colName, target] of convert) {
+      const c = kept.find(c => c.name === colName);
+      const match = c.kind === 'INTEGER' ? autoKey(target) : labelColumn(target);
+      const missing = query('SELECT DISTINCT ' + qid(colName) + ' FROM ' + O + ' WHERE ' + qid(colName) + ' IS NOT NULL AND ' +
+        qid(colName) + ' NOT IN (SELECT ' + qid(match) + ' FROM ' + qid(target) + ' WHERE ' + qid(match) + ' IS NOT NULL) LIMIT 6').values.map(r => r[0]);
+      if (missing.length)
+        return { sql: stmts, error: 'Can’t link ' + colName + ' to ' + target + ': ' + (missing.length > 5 ? 'these values (and more) have' : missing.length === 1 ? 'this value has' : 'these values have') +
+          ' no matching ' + match + ' in ' + target + ':\n  ' + missing.slice(0, 5).map(v => '“' + v + '”').join(', ') +
+          '\nAdd ' + (missing.length === 1 ? 'it' : 'them') + ' to ' + target + ' first, or correct ' + colName + ' in those records.' };
+    }
+
+    const tmp = qid('__crudulator_new');
+    const defs = kept.map(c => {
+      const target = convert.get(c.name);
+      let d = qid(c.name) + ' ' + (target ? 'INTEGER' : (c.decl || ''));
+      if (c.auto) d += ' PRIMARY KEY';
+      if (c.notnull) d += ' NOT NULL';
+      if (c.dflt !== null && !target) d += ' DEFAULT ' + c.dflt;
+      if (target) d += ' REFERENCES ' + qid(target) + '(' + qid(autoKey(target)) + ')';
+      else if (c.ref) d += ' REFERENCES ' + qid(c.ref.table) + '(' + qid(c.ref.col) + ')';
+      return d.replace(/ {2,}/g, ' ');
+    });
+    const pkCols = kept.filter(c => c.pk && !c.auto).sort((a, b) => a.pkPos - b.pkPos);
+    if (pkCols.length) defs.push('PRIMARY KEY (' + pkCols.map(c => qid(c.name)).join(', ') + ')');
+    for (const c of cols) defs.push(colDef({ ...c, required: false }));
+
+    const copy = kept.map(c => {
+      const target = convert.get(c.name);
+      if (!target || c.kind === 'INTEGER') return qid(c.name);
+      // Text column: look up each value's id by the target's label column.
+      return '(SELECT ' + qid(autoKey(target)) + ' FROM ' + qid(target) + ' WHERE ' + qid(labelColumn(target)) + ' = ' + O + '.' + qid(c.name) +
+        ' ORDER BY ' + qid(autoKey(target)) + ' LIMIT 1)';
+    });
+    stmts.push('CREATE TABLE ' + tmp + ' (\n  ' + defs.join(',\n  ') + '\n);');
+    stmts.push('INSERT INTO ' + tmp + ' (' + kept.map(c => qid(c.name)).join(', ') + ')\n  SELECT ' + copy.join(',\n         ') + '\n  FROM ' + O + ';');
+    stmts.push('DROP TABLE ' + O + ';');
+    stmts.push('ALTER TABLE ' + tmp + ' RENAME TO ' + O + ';');
+    for (const [sql] of query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", [orig]).values)
+      stmts.push(sql + ';');
+    if (renaming) stmts.push('ALTER TABLE ' + O + ' RENAME TO ' + qid(name) + ';');
+    return { sql: stmts, error: null, rebuild: true };
   }
 
   function updateSql() {
     const { sql, error, nothing } = buildDesign();
-    $('d-sql').textContent = sql.length ? sql.join('\n') : nothing ? '-- No changes yet' : '-- Fill in the table name and columns';
+    $('d-sql').textContent = sql.length ? sql.join('\n') : nothing ? '-- No changes yet'
+      : error ? error.split('\n').map(l => '-- ' + l.trim()).join('\n') : '-- Fill in the table name and columns';
     $('d-save').disabled = !!nothing;
     if (!error) $('d-error').hidden = true;
   }
@@ -688,17 +835,23 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 
   $('design-view').addEventListener('submit', e => {
     e.preventDefault();
-    const { sql, error } = buildDesign();
+    const { sql, error, rebuild } = buildDesign();
     if (error) { $('d-error').textContent = error; $('d-error').hidden = false; return; }
     if (design.drop.size && !confirm('Removing ' + [...design.drop].join(', ') + ' deletes the data in ' + (design.drop.size === 1 ? 'that column' : 'those columns') + '. Continue?')) return;
+    // A rebuild drops and recreates the table, which needs link checking off until the swap is complete.
+    if (rebuild) db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec('BEGIN');
       for (const s of sql) db.exec(s);
+      if (rebuild && query('PRAGMA foreign_key_check').values.length)
+        throw new Error('The change would leave some links pointing at records that don’t exist, so nothing was changed.');
       db.exec('COMMIT');
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch (_) {}
       $('d-error').textContent = err.message; $('d-error').hidden = false;
       return;
+    } finally {
+      enforceLinks();
     }
     markDirty();
     sort = { col: null, dir: 'ASC' };
@@ -707,7 +860,8 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   $('d-cancel').addEventListener('click', () => refreshTables());
   $('d-drop').addEventListener('click', () => {
     if (!confirm('Delete the table ' + design.original + ' and all its records? This can’t be undone.')) return;
-    db.exec('DROP TABLE ' + qid(design.original));
+    try { db.exec('DROP TABLE ' + qid(design.original)); }
+    catch (err) { $('d-error').textContent = friendlyError(err, 'drop'); $('d-error').hidden = false; return; }
     markDirty();
     refreshTables();
   });
@@ -733,7 +887,7 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   // anywhere else, an ordinary .db download.
   const downloadsP = window.claude?.use ? window.claude.use('downloads') : Promise.resolve(null);
   $('save-btn').addEventListener('click', async () => {
-    const bytes = db.export();
+    const bytes = exportDb();
     const downloads = await downloadsP;
     if (downloads) {
       try {

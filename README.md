@@ -22,14 +22,15 @@ Open a SQLite database file in your browser, browse its tables and columns, and 
 
 Design a SQLite table and get a simple data-entry application for it: list, search, add, edit and delete records.
 
-- **Design a table:** give it a name and columns. Each column has a type (Text, Long text, Whole number, Decimal number, Date, Yes / No) and can be required. An auto-numbered `id` is added for you, and the SQL is shown before it runs.
+- **Design a table:** give it a name and columns. Each column has a type (Text, Long text, Whole number, Decimal number, Date, Yes / No, or Link to another table) and can be required. An auto-numbered `id` is added for you, and the SQL is shown before it runs.
 - **Change a design:** rename the table, add or remove columns, or delete the table.
+- **Link tables (foreign keys):** a column can link to a record in another table. Linked columns show the other record's name in the list and a drop-down in the form, and links are enforced. An existing column can be converted into a link: text values are matched by name, and anything without a match is reported before any change is made.
 - **Work with records:** a sortable, searchable list. Click a row to edit or delete it; forms use the right input for each type.
 - **Open existing databases:** any SQLite file works, and you can pick which of its tables to work with.
 - **Name your database:** **New database** asks for a file name, and you can rename it by clicking the name in the header.
 - **Remembered between visits:** every change is saved in the browser (IndexedDB) and the database reopens next time. The browser keeps one database at a time and clearing site data deletes it, so **Download database** is still your real backup.
 
-It handles one table at a time for now; multiple tables and screen designers are planned.
+Each screen works with one table at a time; screen designers are planned.
 
 ---
 
