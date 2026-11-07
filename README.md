@@ -77,3 +77,17 @@ pytest -k link            # run only tests with "link" in their name
 ```
 
 The tests serve the repository from a local web server, so no setup is needed beyond the above. The pages fetch sql.js and JSZip from cdnjs; to run offline, put `sql-asm.js` and `jszip.min.js` in a folder and set `CRUD_LOCAL_LIBS` to its path (add `js-yaml.min.js` for the Mind Map Editor tests).
+
+## Recording the demo video
+
+`demos/mindmap_demo.py` records a one-minute demo of the Mind Map Editor as an mp4: it starts a new map, adds and edits branches, adds a note, connects two branches and saves the map, with captions for each step. It needs Playwright with Chromium (as for the tests) and `ffmpeg`.
+
+In Jupyter, from the `demos` folder:
+
+```python
+from mindmap_demo import record_mindmap_demo
+await record_mindmap_demo('mindmap-demo.mp4')
+```
+
+It records the published page by default; pass `url='file:///…/mindmap-editor.html'` to record your local copy.
+

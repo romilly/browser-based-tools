@@ -91,7 +91,7 @@ aside label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:v
 .pane{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0}
 #noteFor,#connWhat{font-weight:600;font-size:14px;overflow-wrap:anywhere}
 aside input{font:14px var(--ui);color:var(--fg);background:var(--canvas);border:1px solid var(--line);border-radius:5px;
-  padding:6px 8px;min-width:0;width:100%}
+  padding:6px 8px;min-width:0;width:100%;box-sizing:border-box}
 aside input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #connDel{align-self:flex-start}
 #note{flex:1;min-height:120px;resize:none;font:14px/1.5 var(--ui);color:var(--fg);background:var(--canvas);
@@ -435,11 +435,17 @@ function drawConnectors() {
     if (!A || !B || A.node === B.node) return;
     const a = A.b, b = B.b;
     const acx = a.x + a.w / 2, bcx = b.x + b.w / 2, y1 = a.y + a.h / 2, y2 = b.y + b.h / 2;
-    let x1, x2, c1, c2;
-    if (Math.abs(bcx - acx) > (a.w + b.w) / 2 + 10) {
-      const dir = bcx > acx ? 1 : -1, off = Math.max(40, Math.abs(bcx - acx) / 3);
+    let x1, x2, c1, c2, c1y = y1, c2y = y2;
+    const dir = bcx > acx ? 1 : -1;
+    const gap = dir > 0 ? b.x - (a.x + a.w) : a.x - (b.x + b.w);   // clear space between the two boxes
+    if (gap > 60) {
+      const off = Math.max(40, gap / 3);
       x1 = dir > 0 ? a.x + a.w : a.x; x2 = dir > 0 ? b.x : b.x + b.w;
       c1 = x1 + dir * off; c2 = x2 - dir * off;
+      // Arc away from the central topic, so long connectors don't run through it.
+      const r = boxes.get(root.id), away = (y1 + y2) / 2 >= r.y + r.h / 2 ? 1 : -1;
+      const bulge = Math.min(160, 30 + gap * 0.25);
+      c1y = y1 + away * bulge; c2y = y2 + away * bulge;
     } else {
       // One above the other: loop out on the side of the map they are on.
       const side = sideOf(A.node === root ? B.node : A.node);
@@ -447,7 +453,7 @@ function drawConnectors() {
       x1 = out > 0 ? a.x + a.w : a.x; x2 = out > 0 ? b.x + b.w : b.x;
       c1 = Math.max(x1 * out, x2 * out) * out + out * off; c2 = c1;
     }
-    const d = `M${x1},${y1} C${c1},${y1} ${c2},${y2} ${x2},${y2}`;
+    const d = `M${x1},${y1} C${c1},${c1y} ${c2},${c2y} ${x2},${y2}`;
     const isSel = selConn && selConn.from === n.id && selConn.i === i;
     const line = document.createElementNS(NS, 'path');
     line.setAttribute('d', d); line.setAttribute('class', 'conn' + (isSel ? ' sel' : ''));
@@ -459,7 +465,7 @@ function drawConnectors() {
     if (c.label) {
       const t = document.createElementNS(NS, 'text');
       t.setAttribute('class', 'clabel' + (isSel ? ' sel' : ''));
-      t.setAttribute('x', (x1 + 3 * c1 + 3 * c2 + x2) / 8); t.setAttribute('y', (y1 + y2) / 2 - 5);
+      t.setAttribute('x', (x1 + 3 * c1 + 3 * c2 + x2) / 8); t.setAttribute('y', (y1 + 3 * c1y + 3 * c2y + y2) / 8 - 5);
       t.setAttribute('text-anchor', 'middle');
       t.dataset.from = n.id; t.dataset.i = i;
       t.textContent = c.label;
