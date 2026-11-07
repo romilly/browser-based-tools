@@ -33,9 +33,23 @@ Design a SQLite table and get a simple data-entry application for it: list, sear
 
 Each screen works with one table at a time; screen designers are planned.
 
+### Mind Map Editor — `mindmap-editor.html`
+
+**[Open the Mind Map Editor](https://romilly.github.io/browser-based-tools/mindmap-editor.html)**
+
+Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a central topic with branches curving out to the left and right. Every branch has a title and an optional note.
+
+- **Add, edit and delete branches:** Tab adds a child, Enter adds a sibling, F2 or a double-click (double-tap on a tablet) edits a title, and Delete removes a branch with everything below it. The toolbar buttons do the same on touch screens.
+- **Notes:** select a branch and type in the Note panel. Branches with a note show a small page icon, and hovering shows the note.
+- **Fold branches:** Space folds or unfolds a branch. A folded branch shows a circle with the number of hidden nodes; click it to unfold.
+- **Move around:** the arrow keys move between branches, and you can drag the empty space (or swipe) to scroll the map.
+- **Undo and redo:** Ctrl+Z and Ctrl+Y, or the toolbar buttons.
+- **Help:** the Help button, or `?`, lists every action.
+- **Remembered between visits:** the map is saved in the browser (localStorage). It is not shared between browsers or devices, and there is no import or export yet.
+
 ---
 
-Both tools need an internet connection on first load, to fetch sql.js and JSZip from cdnjs.
+The SQLite Browser and CRUDulator need an internet connection on first load, to fetch sql.js and JSZip from cdnjs. The Mind Map Editor needs no libraries; it fetches its fonts from Google Fonts and falls back to system fonts offline.
 
 ## Running the tests
 
