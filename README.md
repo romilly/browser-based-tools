@@ -26,7 +26,8 @@ Design a SQLite table and get a simple data-entry application for it: list, sear
 - **Change a design:** rename the table, add or remove columns, or delete the table.
 - **Work with records:** a sortable, searchable list. Click a row to edit or delete it; forms use the right input for each type.
 - **Open existing databases:** any SQLite file works, and you can pick which of its tables to work with.
-- Changes are held in memory until you click **Download database**.
+- **Name your database:** **New database** asks for a file name, and you can rename it by clicking the name in the header.
+- **Remembered between visits:** every change is saved in the browser (IndexedDB) and the database reopens next time. The browser keeps one database at a time and clearing site data deletes it, so **Download database** is still your real backup.
 
 It handles one table at a time for now; multiple tables and screen designers are planned.
 

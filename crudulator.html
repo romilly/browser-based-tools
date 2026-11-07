@@ -248,9 +248,13 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     </ul>
 
     <h3>Opening and saving</h3>
-    <p>Everything happens in your browser; nothing is uploaded. <b>Open database…</b> (or dropping a file onto the page) loads an existing SQLite file, and you can work with any of its tables. Your changes are held in memory until you click <b>Download database</b>. The file name shows <i>Unsaved changes</i> when there is something to download.</p>
+    <p>Everything happens in your browser; nothing is uploaded. <b>Open database…</b> (or dropping a file onto the page) loads an existing SQLite file, and you can work with any of its tables. <b>Download database</b> saves a copy as a file.</p>
     <p><b>New database</b> asks for a file name. To change the name of any database, click its name under the title; the new name is used the next time you download. If you leave out the extension, <code>.db</code> is added.</p>
-    <p>Nothing is kept in the browser between visits: if you reload or close the page without downloading, your changes are lost. The page warns you before you leave with unsaved changes.</p>
+
+    <h3>Saved in this browser</h3>
+    <p>Every change is saved automatically in this browser's own storage, and the database reopens when you come back to the page. The header shows <i>saved in this browser</i> when that has worked.</p>
+    <p>The browser keeps <b>one database at a time</b>. Opening a file or starting a new database replaces it, so you'll be asked first if the current one has changes you haven't downloaded.</p>
+    <p>This copy belongs to this browser on this computer only, and clearing your browsing data deletes it. Treat <b>Download database</b> as your real backup: the <i>Not downloaded</i> tag shows when there are changes that aren't in a downloaded file yet.</p>
     <p>When the page is opened inside Claude, the database is saved inside a <code>.zip</code> file, because Claude doesn't allow <code>.db</code> downloads directly.</p>
 
     <h3>Requirements</h3>
@@ -295,25 +299,70 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
   function fmtBytes(n) { return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
   function query(sql, params) { const r = db.exec(sql, params); return r.length ? r[0] : { columns: [], values: [] }; }
 
+  // ---------- browser storage ----------
+  // The current database is kept in IndexedDB under one key, so it survives a reload.
+  // If IndexedDB is unavailable (some private windows), the page still works; it just won't remember.
+  const store = (() => {
+    let opening;
+    function open() {
+      return opening ||= new Promise((resolve, reject) => {
+        const req = indexedDB.open('crudulator', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('files');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    async function run(mode, fn) {
+      const idb = await open();
+      return new Promise((resolve, reject) => {
+        const tx = idb.transaction('files', mode);
+        const req = fn(tx.objectStore('files'));
+        tx.oncomplete = () => resolve(req.result);
+        tx.onerror = tx.onabort = () => reject(tx.error);
+      });
+    }
+    return {
+      load: () => run('readonly', s => s.get('current')),
+      save: record => run('readwrite', s => s.put(record, 'current')),
+    };
+  })();
+  let browserSaved = false;   // true once the current state is safely in IndexedDB
+  async function persist() {
+    browserSaved = false;
+    try {
+      await store.save({ name: fileName, bytes: db.export(), dirty, savedAt: Date.now() });
+      browserSaved = true;
+    } catch (e) {
+      console.warn('Could not save in the browser:', e);
+    }
+    showFileInfo();
+  }
+
   // ---------- database lifecycle ----------
-  function setDb(next, name, sample) {
+  function setDb(next, name, sample, wasDirty = false) {
     if (db) db.close();
-    db = next; fileName = name; isSample = sample; dirty = false;
+    db = next; fileName = name; isSample = sample; dirty = wasDirty;
     table = null; sort = { col: null, dir: 'ASC' }; search = ''; $('search').value = '';
     showFileInfo();
     refreshTables();
   }
-  function markDirty() { dirty = true; showFileInfo(); }
+  function markDirty() { dirty = true; persist(); }
   function showFileInfo() {
     const size = fmtBytes(db.export().length);
     $('file-info').innerHTML = '<button type="button" class="name-btn" id="name-btn" title="Rename the database file">' +
       esc(fileName) + ' <span aria-hidden="true">✎</span></button> · ' + size +
+      (browserSaved ? ' · saved in this browser' : '') +
       (isSample ? '<span class="tag">Sample data</span>' : '') +
-      (dirty ? '<span class="tag dirty">Unsaved changes</span>' : '');
+      (dirty ? '<span class="tag dirty">Not downloaded</span>' : '');
     $('name-btn').addEventListener('click', () => {
       const name = askFileName('File name for this database', fileName);
-      if (name && name !== fileName) { fileName = name; showFileInfo(); }
+      if (name && name !== fileName) { fileName = name; persist(); }
     });
+  }
+  // Before replacing the database the browser is keeping, check it's safe to do so.
+  function okToReplace(action) {
+    return !dirty || confirm('The current database (' + fileName + ') has changes you haven’t downloaded. ' +
+      'This browser keeps only one database, so ' + action + ' will replace it. Continue?');
   }
   // Ask for a file name; returns a cleaned-up name ending in an extension, or null if cancelled.
   function askFileName(message, suggested) {
@@ -324,16 +373,18 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
     if (!/\.[A-Za-z0-9]+$/.test(name)) name += '.db';
     return name;
   }
-  window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+  // Only warn on leaving if the work isn't safely stored in the browser.
+  window.addEventListener('beforeunload', e => { if (dirty && !browserSaved) { e.preventDefault(); e.returnValue = ''; } });
 
   function openBytes(bytes, name) {
     let next;
     try { next = new SQL.Database(bytes); next.exec('SELECT count(*) FROM sqlite_master'); }
     catch (e) { alert('That file could not be opened as a SQLite database:\n' + e.message); return; }
     setDb(next, name, false);
+    persist();
   }
   function readFile(file) {
-    if (dirty && !confirm('You have unsaved changes. Open another database anyway?')) return;
+    if (!okToReplace('opening ' + file.name)) return;
     const reader = new FileReader();
     reader.onload = () => openBytes(new Uint8Array(reader.result), file.name);
     reader.onerror = () => alert('The file could not be read.');
@@ -667,10 +718,11 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 
   // ---------- file actions ----------
   $('new-db-btn').addEventListener('click', () => {
-    if (dirty && !confirm('You have unsaved changes. Start a new database anyway?')) return;
+    if (!okToReplace('starting a new database')) return;
     const name = askFileName('File name for the new database', 'crud.db');
     if (!name) return;
     setDb(new SQL.Database(), name, false);
+    persist();
   });
   $('open-btn').addEventListener('click', () => $('file-input').click());
   $('file-input').addEventListener('change', e => { if (e.target.files[0]) readFile(e.target.files[0]); e.target.value = ''; });
@@ -700,7 +752,7 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
-    dirty = false; isSample = false; showFileInfo();
+    dirty = false; isSample = false; persist();
   });
 
   const helpDlg = $('help');
@@ -726,7 +778,22 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
       ('Grace Hopper', 'grace@example.com', '01234 111222', '1906-12-09', 0, 'Popularised the term "debugging".'),
       ('Edsger Dijkstra', NULL, NULL, '1930-05-11', 1, NULL);
   `);
-  setDb(sample, 'contacts.db', true);
+
+  // Reopen the database kept in this browser, if there is one; otherwise show the sample.
+  let saved = null;
+  try { saved = await store.load(); } catch (e) { console.warn('Browser storage unavailable:', e); }
+  let restored = null;
+  if (saved && saved.bytes) {
+    try { restored = new SQL.Database(saved.bytes); restored.exec('SELECT count(*) FROM sqlite_master'); }
+    catch (e) { restored = null; }
+  }
+  if (restored) {
+    sample.close();
+    browserSaved = true;
+    setDb(restored, saved.name, false, !!saved.dirty);
+  } else {
+    setDb(sample, 'contacts.db', true);
+  }
 })();
 </script>
 </body>
