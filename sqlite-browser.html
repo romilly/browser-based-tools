@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SQLite Browser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-asm.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+/* Layout: two-pane workbench — schema sidebar left, query editor + result grid right; stacks on phones */
+:root {
+  --bg: #f5f6f4;
+  --panel: #ffffff;
+  --fg: #1d2421;
+  --muted: #5f6b66;
+  --line: #d9dfdb;
+  --accent: #1f6f5c;
+  --accent-ink: #ffffff;
+  --code-bg: #eef1ef;
+  --err: #a8322a;
+  --err-bg: #fbecea;
+  --null: #9aa5a0;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+  box-sizing: border-box;
+}
+*, *::before, *::after { box-sizing: inherit; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141917; --panel: #1b211f; --fg: #e3e8e5; --muted: #95a29c; --line: #2d3532;
+    --accent: #4fb89b; --accent-ink: #0d1412; --code-bg: #111614; --err: #f0877e; --err-bg: #3a1d1a; --null: #66726d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141917; --panel: #1b211f; --fg: #e3e8e5; --muted: #95a29c; --line: #2d3532;
+  --accent: #4fb89b; --accent-ink: #0d1412; --code-bg: #111614; --err: #f0877e; --err-bg: #3a1d1a; --null: #66726d;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 32px;
+}
+.wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; justify-content: space-between; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; text-wrap: balance; }
+.file-info { font-family: var(--font-code); font-size: 12.5px; color: var(--muted); }
+.file-info b { color: var(--fg); font-weight: 500; }
+.sample-tag { display: inline-block; font-family: var(--font-ui); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; margin-left: 6px; color: var(--muted); }
+.open-btn, .run-btn {
+  font: 500 14px var(--font-ui); border-radius: 6px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--accent);
+}
+.open-btn { background: transparent; color: var(--accent); }
+.run-btn { background: var(--accent); color: var(--accent-ink); }
+.open-btn:hover { background: var(--code-bg); }
+.run-btn:hover { filter: brightness(1.08); }
+button:focus-visible, textarea:focus-visible, .table-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#file-input { display: none; }
+.drop-hint { font-size: 12.5px; color: var(--muted); }
+
+.main { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 720px) { .main { grid-template-columns: minmax(0, 1fr); } }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.panel-head { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+
+.tables { list-style: none; margin: 0; padding: 6px; max-height: 60vh; overflow-y: auto; }
+.table-item { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--fg);
+  font: 500 13.5px var(--font-code); padding: 7px 8px; border-radius: 5px; cursor: pointer; }
+.table-item:hover, .table-item[aria-expanded="true"] { background: var(--code-bg); }
+.table-item .kind { font: 11px var(--font-ui); color: var(--muted); float: right; }
+.cols { list-style: none; margin: 2px 0 6px 0; padding: 0 8px 0 20px; font: 12.5px var(--font-code); color: var(--muted); }
+.cols li { padding: 2px 0; display: flex; justify-content: space-between; gap: 8px; }
+.cols .pk { color: var(--accent); }
+.empty { padding: 14px; color: var(--muted); font-size: 13px; }
+
+.editor { display: grid; }
+textarea#sql {
+  font: 13.5px/1.55 var(--font-code); background: var(--code-bg); color: var(--fg); border: 0; resize: vertical;
+  min-height: 120px; padding: 12px 14px; border-bottom: 1px solid var(--line);
+}
+.editor-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; padding: 10px 14px; }
+.kbd { font: 12px var(--font-code); color: var(--muted); }
+
+.status { padding: 10px 14px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.status.error { color: var(--err); background: var(--err-bg); font-family: var(--font-code); white-space: pre-wrap; }
+.grid-wrap { overflow: auto; max-height: 60vh; }
+table.results { border-collapse: collapse; font: 13px var(--font-code); font-variant-numeric: tabular-nums; width: max-content; min-width: 100%; }
+.results th, .results td { padding: 6px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+.results th { position: sticky; top: 0; background: var(--panel); font-weight: 600; z-index: 1; }
+.results td.num { text-align: right; }
+.results td.null { color: var(--null); font-style: italic; }
+.results tbody tr:hover { background: var(--code-bg); }
+
+dialog#help { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 0; width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+dialog#help::backdrop { background: rgb(0 0 0 / .45); }
+.help-head { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+.help-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.help-body { padding: 4px 20px 20px; line-height: 1.6; max-width: 65ch; }
+.help-body h3 { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 20px 0 6px; }
+.help-body p, .help-body ul { margin: 0 0 8px; }
+.help-body ul { padding-left: 20px; }
+.help-body code, .help-body kbd { font: 12.5px var(--font-code); background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+.close-btn { background: none; border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 5px 10px; font: 500 13px var(--font-ui); cursor: pointer; }
+.close-btn:hover { background: var(--code-bg); }
+.result-set + .result-set { border-top: 4px solid var(--line); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>SQLite Browser</h1>
+      <div class="file-info" id="file-info">Loading…</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="drop-hint">or drop a .sqlite / .db file anywhere</span>
+      <button class="open-btn" id="open-btn" type="button">Open database file…</button>
+      <button class="open-btn" id="save-btn" type="button">Download database</button>
+      <button class="open-btn" id="help-btn" type="button" aria-haspopup="dialog">Help</button>
+      <input type="file" id="file-input" accept=".sqlite,.sqlite3,.db,.db3,application/x-sqlite3,application/vnd.sqlite3,*/*">
+    </div>
+  </header>
+
+  <div class="main">
+    <aside class="panel">
+      <div class="panel-head"><span>Tables</span><span id="table-count"></span></div>
+      <ul class="tables" id="tables"></ul>
+    </aside>
+
+    <section class="panel editor" style="min-width:0">
+      <div class="panel-head"><span>Query</span></div>
+      <textarea id="sql" spellcheck="false" aria-label="SQL query"></textarea>
+      <div class="editor-bar">
+        <span class="kbd">Ctrl/⌘ + Enter to run</span>
+        <button class="run-btn" id="run-btn" type="button">Run query</button>
+      </div>
+      <div class="status" id="status">Click a table to preview it, or write SQL above.</div>
+      <div id="results"></div>
+    </section>
+  </div>
+</div>
+
+<dialog id="help" aria-labelledby="help-title">
+  <div class="help-head">
+    <h2 id="help-title">Using SQLite Browser</h2>
+    <button class="close-btn" id="help-close" type="button">Close</button>
+  </div>
+  <div class="help-body">
+    <h3>Opening a database</h3>
+    <p>Click <b>Open database file…</b> and choose a SQLite file (usually <code>.db</code>, <code>.sqlite</code> or <code>.sqlite3</code>), or drag the file anywhere onto the page. The page opens with a small sample database marked <i>Sample data</i> so you can try it first.</p>
+    <p>Your file is never uploaded. SQLite runs inside your browser using sql.js, and the database is held in memory.</p>
+
+    <h3>Browsing tables</h3>
+    <ul>
+      <li>The <b>Tables</b> panel lists every table and view.</li>
+      <li>Click a name to see its columns and types. The primary key is shown in the accent colour.</li>
+      <li>Clicking a table also runs <code>SELECT * … LIMIT 100</code> so you can see its contents.</li>
+    </ul>
+
+    <h3>Running queries</h3>
+    <ul>
+      <li>Type any SQL in the Query box and click <b>Run query</b>, or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>⌘</kbd>+<kbd>Enter</kbd> on a Mac).</li>
+      <li>Several statements separated by semicolons are run in order. Each one that returns rows gets its own result grid.</li>
+      <li>Errors from SQLite are shown in red above the results.</li>
+      <li>Results show the first 5,000 rows. Add a <code>LIMIT</code> if you need fewer.</li>
+      <li><code>NULL</code> values appear in grey italics. BLOB columns show their size rather than their contents.</li>
+    </ul>
+
+    <h3>Changing and saving data</h3>
+    <p>You can run <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>CREATE TABLE</code> and other statements. They change the in-memory copy only; the file on your disk is untouched.</p>
+    <p>To keep your changes, click <b>Download database</b>. Your browser saves it like any other download, using the name of the file you opened. If your browser is set to ask where to save files, you can choose the name and folder.</p>
+    <p>When the page is opened inside Claude, the database is saved inside a <code>.zip</code> file, because Claude doesn't allow <code>.db</code> downloads directly.</p>
+
+    <h3>Requirements</h3>
+    <p>The page loads sql.js and JSZip from cdnjs, so it needs an internet connection when it first opens.</p>
+  </div>
+</dialog>
+
+<script>
+(async () => {
+  const $ = id => document.getElementById(id);
+  const fileInfo = $('file-info'), tablesEl = $('tables'), sqlEl = $('sql'),
+        statusEl = $('status'), resultsEl = $('results'), countEl = $('table-count');
+  const SQL = await initSqlJs();
+  let db = null, currentName = 'database.db';
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function qid(name) { return '"' + name.replace(/"/g, '""') + '"'; }
+  function fmtBytes(n) { return n < 1024 ? n + ' B' : n < 1048576 ? (n/1024).toFixed(1) + ' KB' : (n/1048576).toFixed(1) + ' MB'; }
+
+  function loadDb(bytes, label, isSample) {
+    try {
+      const next = new SQL.Database(bytes);
+      next.exec('SELECT count(*) FROM sqlite_master'); // validates the file
+      if (db) db.close();
+      db = next;
+    } catch (e) {
+      setStatus('That file could not be opened as a SQLite database: ' + e.message, true);
+      return;
+    }
+    currentName = label;
+    fileInfo.innerHTML = '<b>' + esc(label) + '</b>' + (bytes ? ' · ' + fmtBytes(bytes.length) : '') +
+      (isSample ? '<span class="sample-tag">Sample data</span>' : '');
+    resultsEl.innerHTML = '';
+    renderTables();
+  }
+
+  function renderTables() {
+    const res = db.exec("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name");
+    const rows = res.length ? res[0].values : [];
+    countEl.textContent = rows.length;
+    tablesEl.innerHTML = '';
+    if (!rows.length) { tablesEl.innerHTML = '<li class="empty">This database has no tables.</li>'; return; }
+    for (const [name, type] of rows) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.className = 'table-item'; btn.type = 'button'; btn.setAttribute('aria-expanded', 'false');
+      btn.innerHTML = esc(name) + (type === 'view' ? '<span class="kind">view</span>' : '');
+      const cols = document.createElement('ul'); cols.className = 'cols'; cols.hidden = true;
+      btn.addEventListener('click', () => {
+        const open = btn.getAttribute('aria-expanded') === 'true';
+        if (!open && !cols.childElementCount) {
+          const info = db.exec('PRAGMA table_info(' + qid(name) + ')');
+          for (const [, cname, ctype, , , pk] of (info[0]?.values || [])) {
+            cols.insertAdjacentHTML('beforeend', '<li><span class="' + (pk ? 'pk' : '') + '">' + esc(cname) + '</span><span>' + esc(ctype || '') + '</span></li>');
+          }
+        }
+        btn.setAttribute('aria-expanded', String(!open));
+        cols.hidden = open;
+        if (!open) { sqlEl.value = 'SELECT * FROM ' + qid(name) + ' LIMIT 100;'; run(); }
+      });
+      li.append(btn, cols);
+      tablesEl.append(li);
+    }
+  }
+
+  function setStatus(msg, isError) { statusEl.textContent = msg; statusEl.classList.toggle('error', !!isError); }
+
+  function run() {
+    if (!db) return;
+    const sql = sqlEl.value.trim();
+    if (!sql) { setStatus('Write a query first.'); return; }
+    const t0 = performance.now();
+    let results;
+    try { results = db.exec(sql); }
+    catch (e) { resultsEl.innerHTML = ''; setStatus(e.message, true); return; }
+    const ms = (performance.now() - t0).toFixed(1);
+    resultsEl.innerHTML = '';
+    if (!results.length) {
+      const changed = db.getRowsModified();
+      setStatus('Query ran in ' + ms + ' ms. No rows returned' + (changed ? '; ' + changed + ' row(s) changed.' : '.'));
+      renderTables();
+      return;
+    }
+    const total = results.reduce((n, r) => n + r.values.length, 0);
+    setStatus(total + ' row' + (total === 1 ? '' : 's') + ' in ' + ms + ' ms' + (results.length > 1 ? ' across ' + results.length + ' result sets' : ''));
+    for (const r of results) {
+      const shown = r.values.slice(0, 5000);
+      let html = '<div class="result-set"><div class="grid-wrap"><table class="results"><thead><tr>' +
+        r.columns.map(c => '<th>' + esc(c) + '</th>').join('') + '</tr></thead><tbody>';
+      for (const row of shown) {
+        html += '<tr>' + row.map(v => {
+          if (v === null) return '<td class="null">NULL</td>';
+          if (v instanceof Uint8Array) return '<td class="null">BLOB ' + v.length + ' B</td>';
+          if (typeof v === 'number') return '<td class="num">' + v + '</td>';
+          return '<td title="' + esc(v) + '">' + esc(v) + '</td>';
+        }).join('') + '</tr>';
+      }
+      html += '</tbody></table></div>';
+      if (r.values.length > shown.length) html += '<div class="status">Showing first 5,000 of ' + r.values.length + ' rows. Add a LIMIT to narrow it.</div>';
+      resultsEl.insertAdjacentHTML('beforeend', html + '</div>');
+    }
+  }
+
+  function readFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => loadDb(new Uint8Array(reader.result), file.name, false);
+    reader.onerror = () => setStatus('The file could not be read.', true);
+    reader.readAsArrayBuffer(file);
+  }
+
+  $('open-btn').addEventListener('click', () => $('file-input').click());
+  $('file-input').addEventListener('change', e => { if (e.target.files[0]) readFile(e.target.files[0]); e.target.value = ''; });
+  $('run-btn').addEventListener('click', run);
+  const helpDlg = $('help');
+  $('help-btn').addEventListener('click', () => helpDlg.showModal());
+  $('help-close').addEventListener('click', () => helpDlg.close());
+  helpDlg.addEventListener('click', e => { if (e.target === helpDlg) helpDlg.close(); });
+
+  // Download: inside Claude use the downloads capability (zip, since .db isn't an allowed type);
+  // opened as a plain local file, fall back to an ordinary .db download.
+  const downloadsP = window.claude?.use ? window.claude.use('downloads') : Promise.resolve(null);
+  $('save-btn').addEventListener('click', async () => {
+    if (!db) return;
+    const bytes = db.export();
+    const downloads = await downloadsP;
+    if (downloads) {
+      try {
+        const zip = new JSZip();
+        zip.file(currentName, bytes);
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        await downloads.save({ filename: currentName.replace(/\.[^.]*$/, '') + '.zip', data: blob });
+        setStatus('Saved ' + currentName + ' inside a zip file.');
+      } catch (e) {
+        if (e && e.code === 'declined') setStatus('Download cancelled.');
+        else setStatus('Download failed: ' + (e && e.message || e), true);
+      }
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.sqlite3' }));
+      a.download = currentName;
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      setStatus('Saved ' + currentName + '.');
+    }
+  });
+  sqlEl.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); } });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) readFile(f); });
+
+  // Sample database so the page opens in a working state
+  const sample = new SQL.Database();
+  sample.exec(`
+    CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL, born INTEGER);
+    CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER REFERENCES authors(id), title TEXT, year INTEGER, pages INTEGER);
+    INSERT INTO authors VALUES (1,'Kenneth Iverson',1920),(2,'Donald Knuth',1938),(3,'Kent Beck',1961),(4,'Harold Abelson',1947);
+    INSERT INTO books VALUES
+      (1,1,'A Programming Language',1962,286),
+      (2,2,'The Art of Computer Programming, Vol. 1',1968,634),
+      (3,2,'Concrete Mathematics',1989,657),
+      (4,3,'Test-Driven Development: By Example',2002,240),
+      (5,3,'Extreme Programming Explained',1999,190),
+      (6,4,'Structure and Interpretation of Computer Programs',1985,657);
+    CREATE VIEW books_by_author AS SELECT a.name, count(*) AS books, sum(b.pages) AS pages FROM authors a JOIN books b ON b.author_id = a.id GROUP BY a.id;
+  `);
+  loadDb(sample.export(), 'sample.db', true);
+  sample.close();
+  sqlEl.value = 'SELECT a.name, b.title, b.year\nFROM books b JOIN authors a ON a.id = b.author_id\nORDER BY b.year;';
+  run();
+})();
+</script>
+</body>
+</html>
