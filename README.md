@@ -46,11 +46,12 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 - **Move around:** the arrow keys move between branches, and you can drag the empty space (or swipe) to scroll the map.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the toolbar buttons.
 - **Help:** the Help button, or `?`, lists every action.
-- **Remembered between visits:** the map is saved in the browser (localStorage). It is not shared between browsers or devices, and there is no import or export yet.
+- **Open and Save:** **Save** downloads the map as a `.zip` file holding one YAML file in the format described by [`mindmap-schema.json`](mindmap-schema.json). **Open** reads one of those, or a plain `.yaml` file, and replaces the current map (Undo brings the old one back). You can also drop a file onto the map. YAML doesn't record which side of the centre a branch is on, so an opened map shares its branches between left and right.
+- **Remembered between visits:** the current map is also kept in the browser (localStorage), but not across browsers or devices, so use **Save** to keep a copy.
 
 ---
 
-The SQLite Browser and CRUDulator need an internet connection on first load, to fetch sql.js and JSZip from cdnjs. The Mind Map Editor needs no libraries; it fetches its fonts from Google Fonts and falls back to system fonts offline.
+The SQLite Browser and CRUDulator need an internet connection on first load, to fetch sql.js and JSZip from cdnjs. The Mind Map Editor fetches js-yaml and JSZip from cdnjs for Open and Save; editing works without them.
 
 ## Running the tests
 
@@ -73,4 +74,4 @@ pytest --headed           # watch the browser while the tests run
 pytest -k link            # run only tests with "link" in their name
 ```
 
-The tests serve the repository from a local web server, so no setup is needed beyond the above. The pages fetch sql.js and JSZip from cdnjs; to run offline, put `sql-asm.js` and `jszip.min.js` in a folder and set `CRUD_LOCAL_LIBS` to its path.
+The tests serve the repository from a local web server, so no setup is needed beyond the above. The pages fetch sql.js and JSZip from cdnjs; to run offline, put `sql-asm.js` and `jszip.min.js` in a folder and set `CRUD_LOCAL_LIBS` to its path (add `js-yaml.min.js` for the Mind Map Editor tests).

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mind Map Editor</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 /* Layout: toolbar band on top; scrolling map canvas fills the rest; note panel on the right (below the map on phones) */
 :root{
@@ -87,6 +89,12 @@ aside label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:v
 .keys dd{margin:0;color:var(--muted)}
 .keys kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--bg)}
 
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;
+  max-width:min(560px,calc(100% - 32px));background:var(--fg);color:var(--canvas);padding:8px 14px;border-radius:6px;
+  font-size:13.5px;line-height:1.4;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+#toast.err{background:var(--danger)}
+main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
+
 @media (max-width:720px){
   main{flex-direction:column}
   aside{width:auto;border-left:0;border-top:1px solid var(--line);height:34%;flex:none;
@@ -114,10 +122,15 @@ aside label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:v
   </div>
   <span class="sep"></span>
   <div class="group">
-    <button id="bHelp" title="Help (?)">Help<kbd>?</kbd></button>
+    <button id="bOpen" title="Open a .zip or .yaml mind map">Open…</button>
+    <button id="bSave" title="Save the map as a zipped YAML file">Save</button>
     <button id="bNew">New map</button>
+    <button id="bHelp" title="Help (?)">Help<kbd>?</kbd></button>
   </div>
 </header>
+
+<input id="fileIn" type="file" accept=".zip,.yaml,.yml" hidden>
+<div id="toast" role="status" hidden></div>
 
 <main>
   <div id="vp"><div id="stage"><svg id="edges"></svg></div></div>
@@ -170,7 +183,9 @@ aside label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:v
     </section>
     <section>
       <h3>Saving</h3>
-      <p>The map saves automatically in this browser. It is not shared with other browsers or devices. New map replaces the current map; Undo brings it back until you reload the page.</p>
+      <p><b>Save</b> downloads the map as a <code>.zip</code> file holding one YAML file. <b>Open</b> reads one of those, or a plain <code>.yaml</code> file, and replaces the current map; you can also drop a file onto the map. Undo brings back the map you replaced, until you reload the page.</p>
+      <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
+      <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
     </section>
   </div>
 </div>
@@ -440,6 +455,106 @@ function navigate(key) {
   }
 }
 
+/* ---------- zipped YAML ---------- */
+function slug(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40); }
+function toObj(n) {
+  const o = { title: n.title };
+  if (n.note && n.note.trim()) o.note = n.note;
+  if (n.children.length) {
+    o.children = {};
+    const ordered = n === root
+      ? [...n.children.filter(c => c.side !== 'left'), ...n.children.filter(c => c.side === 'left')]
+      : n.children;
+    for (const c of ordered) {
+      let k = slug(c.title) || 'node', base = k, i = 2;
+      while (k in o.children) k = `${base}_${i++}`;
+      o.children[k] = toObj(c);
+    }
+  }
+  return o;
+}
+function toYaml() { return jsyaml.dump({ root: toObj(root) }, { lineWidth: -1, noRefs: true, sortKeys: false }); }
+function fromYaml(text) {
+  let doc;
+  try { doc = jsyaml.load(text); }
+  catch (e) { throw new Error('This file is not valid YAML: ' + (e.reason || e.message) + '.'); }
+  if (!doc || typeof doc !== 'object' || !doc.root) throw new Error('This file has no top-level "root" key, so it is not a mind map.');
+  let next = 0;
+  const conv = (o, path) => {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(`In this file, ${path} is not a node.`);
+    if (typeof o.title !== 'string') throw new Error(`In this file, ${path} has no title.`);
+    const n = { id: ++next, title: o.title, note: typeof o.note === 'string' ? o.note : '', children: [], folded: false, side: null };
+    if (o.children != null) {
+      if (typeof o.children !== 'object' || Array.isArray(o.children)) throw new Error(`In this file, ${path}.children is not a set of named nodes.`);
+      for (const [k, v] of Object.entries(o.children)) n.children.push(conv(v, `${path}.${k}`));
+    }
+    return n;
+  };
+  const r = conv(doc.root, 'root');
+  const half = Math.ceil(r.children.length / 2);
+  r.children.forEach((c, i) => c.side = i < half ? 'right' : 'left');
+  return r;
+}
+
+let toastTimer;
+function toast(text, isError = false) {
+  const t = $('#toast');
+  t.textContent = text; t.className = isError ? 'err' : ''; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 9000 : 4000);
+}
+function libsReady() {
+  if (window.jsyaml && window.JSZip) return true;
+  toast('Open and Save need an internet connection the first time the page loads. Reload the page and try again.', true);
+  return false;
+}
+
+// Inside Claude, files are offered through the downloads capability; elsewhere, an ordinary download.
+const downloadsP = window.claude?.use ? window.claude.use('downloads') : Promise.resolve(null);
+async function saveFile(name, blob) {
+  const downloads = await downloadsP;
+  if (downloads) {
+    try { await downloads.save({ filename: name, data: blob }); return true; }
+    catch (e) {
+      if (!(e && e.code === 'declined')) toast('Save failed: ' + (e && e.message || e), true);
+      return false;
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return true;
+}
+async function saveMap() {
+  if (!libsReady()) return;
+  if (editing) finishEdit(true);
+  const name = slug(root.title) || 'mindmap';
+  const zip = new JSZip();
+  zip.file(name + '.yaml', toYaml());
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  if (await saveFile(name + '.zip', blob)) toast(`Saved ${name}.zip.`);
+}
+async function openFile(file) {
+  if (!libsReady()) return;
+  try {
+    let text;
+    if (/\.ya?ml$/i.test(file.name)) text = await file.text();
+    else {
+      let zip;
+      try { zip = await JSZip.loadAsync(file); }
+      catch (e) { throw new Error(`${file.name} is not a .zip or .yaml file.`); }
+      const entry = Object.values(zip.files).find(f => !f.dir && /\.ya?ml$/i.test(f.name) && !f.name.startsWith('__MACOSX/'));
+      if (!entry) throw new Error(`${file.name} has no .yaml file in it.`);
+      text = await entry.async('string');
+    }
+    const r = fromYaml(text);
+    snapshot();
+    root = r; uid = maxId(root); sel = root; boxes = new Map();
+    changed();
+    toast(`Opened ${file.name}: ${countAll(root) + 1} nodes.`);
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ---------- help ---------- */
 function openHelp() { $('#dlg').hidden = false; $('#hClose').focus(); }
 function closeHelp() { $('#dlg').hidden = true; vp.focus({ preventScroll: true }); }
@@ -453,6 +568,16 @@ $('#bDel').onclick = del;
 $('#bUndo').onclick = undo;
 $('#bRedo').onclick = redo;
 $('#bHelp').onclick = openHelp;
+$('#bSave').onclick = saveMap;
+$('#bOpen').onclick = () => $('#fileIn').click();
+$('#fileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); };
+const mainEl = document.querySelector('main');
+mainEl.addEventListener('dragover', e => { e.preventDefault(); mainEl.classList.add('drop'); });
+mainEl.addEventListener('dragleave', () => mainEl.classList.remove('drop'));
+mainEl.addEventListener('drop', e => {
+  e.preventDefault(); mainEl.classList.remove('drop');
+  const f = e.dataTransfer.files[0]; if (f) openFile(f);
+});
 $('#bNew').onclick = () => { snapshot(); uid = 0; root = mk('New mind map'); sel = root; boxes = new Map(); changed(); };
 $('#hClose').onclick = closeHelp;
 $('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeHelp(); });

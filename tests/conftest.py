@@ -1,7 +1,7 @@
 """Shared fixtures: a local web server for the repo, and an App helper that drives crudulator.html.
 
 The pages load sql.js and JSZip from cdnjs. To run without internet access, set CRUD_LOCAL_LIBS
-to a folder containing sql-asm.js and jszip.min.js; requests for them are then served from there.
+to a folder containing sql-asm.js, jszip.min.js and js-yaml.min.js; requests for them are then served from there.
 """
 import functools
 import http.server
