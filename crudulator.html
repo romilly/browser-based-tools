@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CRUDulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-asm.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+/* Layout: header with file actions; table bar; one panel that shows either the data grid or the table designer */
+:root {
+  --bg: #f5f6f4; --panel: #ffffff; --fg: #1d2421; --muted: #5f6b66; --line: #d9dfdb;
+  --accent: #1f6f5c; --accent-ink: #ffffff; --code-bg: #eef1ef;
+  --err: #a8322a; --err-bg: #fbecea; --null: #9aa5a0;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light; box-sizing: border-box;
+}
+*, *::before, *::after { box-sizing: inherit; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141917; --panel: #1b211f; --fg: #e3e8e5; --muted: #95a29c; --line: #2d3532;
+    --accent: #4fb89b; --accent-ink: #0d1412; --code-bg: #111614; --err: #f0877e; --err-bg: #3a1d1a; --null: #66726d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141917; --panel: #1b211f; --fg: #e3e8e5; --muted: #95a29c; --line: #2d3532;
+  --accent: #4fb89b; --accent-ink: #0d1412; --code-bg: #111614; --err: #f0877e; --err-bg: #3a1d1a; --null: #66726d;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 32px;
+}
+.wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; justify-content: space-between; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; }
+.file-info { font-family: var(--font-code); font-size: 12.5px; color: var(--muted); }
+.file-info b { color: var(--fg); font-weight: 500; }
+.tag { display: inline-block; font-family: var(--font-ui); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; margin-left: 6px; color: var(--muted); }
+.tag.dirty { border-color: var(--accent); color: var(--accent); }
+.actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+button { font: 500 14px var(--font-ui); border-radius: 6px; padding: 7px 13px; cursor: pointer;
+  border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+button:hover { background: var(--code-bg); }
+button.primary { background: var(--accent); color: var(--accent-ink); }
+button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+button.quiet { border-color: var(--line); color: var(--fg); }
+button.danger { border-color: var(--err); color: var(--err); }
+button.icon { padding: 4px 9px; border-color: var(--line); color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, tr[tabindex]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+#file-input { display: none; }
+
+input, select, textarea { font: 14px var(--font-ui); color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+textarea { font-family: var(--font-ui); resize: vertical; min-height: 90px; }
+input.code, .code { font-family: var(--font-code); font-size: 13px; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.bar .spacer { flex: 1; }
+.bar label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#search { min-width: 0; width: 220px; }
+
+.empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+.empty p { margin: 0 0 14px; }
+
+.grid-wrap { overflow: auto; max-height: 65vh; }
+table.grid { border-collapse: collapse; font-variant-numeric: tabular-nums; width: max-content; min-width: 100%; }
+.grid th, .grid td { padding: 7px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
+  white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.grid th { position: sticky; top: 0; background: var(--panel); z-index: 1; padding: 0; }
+.grid th button { all: unset; display: block; padding: 7px 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
+.grid th button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.grid th .arrow { color: var(--accent); margin-left: 4px; }
+.grid td.num { text-align: right; font-family: var(--font-code); font-size: 13px; }
+.grid td.null { color: var(--null); }
+.grid tbody tr { cursor: pointer; }
+.grid tbody tr:hover { background: var(--code-bg); }
+.note { padding: 10px 14px; font-size: 13px; color: var(--muted); }
+
+/* Designer */
+.designer { padding: 16px 14px 18px; display: grid; gap: 16px; max-width: 760px; }
+.field { display: grid; gap: 5px; }
+.field > span { font-size: 13px; font-weight: 500; }
+.hint { font-size: 12.5px; color: var(--muted); }
+.cols-head, .col-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 80px 36px; gap: 8px; align-items: center; }
+.cols-head { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.col-row { padding: 3px 0; }
+.col-row.fixed { color: var(--muted); font-family: var(--font-code); font-size: 13px; }
+.col-row.fixed span { padding: 0 2px; }
+.col-row.dropping span:not(.keep) { text-decoration: line-through; }
+.col-row input[type=checkbox] { justify-self: center; width: 16px; height: 16px; }
+.col-row .req { justify-self: center; }
+@media (max-width: 560px) { .cols-head, .col-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px 36px; } }
+pre.sql { margin: 0; background: var(--code-bg); border-radius: 6px; padding: 10px 12px; font: 12.5px/1.5 var(--font-code);
+  white-space: pre-wrap; word-break: break-word; color: var(--fg); }
+.error { color: var(--err); background: var(--err-bg); border-radius: 6px; padding: 8px 10px; font-size: 13px; white-space: pre-wrap; }
+.design-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.design-actions .spacer { flex: 1; }
+
+/* Dialogs */
+dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 0; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+dialog::backdrop { background: rgb(0 0 0 / .45); }
+.dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.dlg-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.dlg-body { padding: 16px 20px; display: grid; gap: 14px; }
+.dlg-body .field input:not([type=checkbox]), .dlg-body .field textarea { width: 100%; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.check input { width: 16px; height: 16px; }
+.req-mark { color: var(--accent); }
+.dlg-foot { display: flex; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
+.dlg-foot .spacer { flex: 1; }
+#help { width: min(640px, calc(100vw - 32px)); }
+.help-body { padding: 4px 20px 20px; line-height: 1.6; max-width: 65ch; }
+.help-body h3 { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 20px 0 6px; }
+.help-body p, .help-body ul { margin: 0 0 8px; }
+.help-body ul { padding-left: 20px; }
+.help-body code { font: 12.5px var(--font-code); background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>CRUDulator</h1>
+      <div class="file-info" id="file-info">Loading…</div>
+    </div>
+    <div class="actions">
+      <button type="button" id="new-db-btn">New database</button>
+      <button type="button" id="open-btn">Open database…</button>
+      <button type="button" id="save-btn">Download database</button>
+      <button type="button" id="help-btn" aria-haspopup="dialog">Help</button>
+      <input type="file" id="file-input" accept=".sqlite,.sqlite3,.db,.db3,application/x-sqlite3,application/vnd.sqlite3,*/*">
+    </div>
+  </header>
+
+  <div class="panel">
+    <div class="bar">
+      <label for="table-select">Table</label>
+      <select id="table-select"></select>
+      <button type="button" class="quiet" id="design-btn">Edit table design</button>
+      <span class="spacer"></span>
+      <button type="button" id="new-table-btn">New table</button>
+    </div>
+
+    <!-- Data view -->
+    <div id="data-view">
+      <div class="bar">
+        <input type="search" id="search" placeholder="Search all columns" aria-label="Search records">
+        <span class="count" id="count"></span>
+        <span class="spacer"></span>
+        <button type="button" class="primary" id="new-record-btn">New record</button>
+      </div>
+      <div class="grid-wrap" id="grid"></div>
+    </div>
+
+    <!-- Empty database -->
+    <div id="empty-view" class="empty" hidden>
+      <p>This database has no tables yet.</p>
+      <button type="button" class="primary" id="first-table-btn">Design your first table</button>
+    </div>
+
+    <!-- Designer -->
+    <form id="design-view" class="designer" hidden novalidate>
+      <label class="field">
+        <span>Table name</span>
+        <input type="text" id="d-name" class="code" autocomplete="off" spellcheck="false">
+        <span class="hint">Letters, digits and underscores, starting with a letter. An <code>id</code> column is added automatically.</span>
+      </label>
+      <div class="field">
+        <span>Columns</span>
+        <div class="cols-head"><span>Name</span><span>Type</span><span style="text-align:center">Required</span><span></span></div>
+        <div id="d-cols"></div>
+        <div><button type="button" class="quiet" id="d-add-col">+ Add column</button></div>
+        <span class="hint" id="d-alter-hint" hidden>Columns added to an existing table can't be required, because SQLite needs a value for every existing row.</span>
+      </div>
+      <div class="field">
+        <span>SQL that will run</span>
+        <pre class="sql" id="d-sql"></pre>
+      </div>
+      <div class="error" id="d-error" hidden></div>
+      <div class="design-actions">
+        <button type="submit" class="primary" id="d-save">Create table</button>
+        <button type="button" class="quiet" id="d-cancel">Cancel</button>
+        <span class="spacer"></span>
+        <button type="button" class="danger" id="d-drop" hidden>Delete table</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<dialog id="record-dlg" aria-labelledby="record-title">
+  <form id="record-form" novalidate>
+    <div class="dlg-head"><h2 id="record-title">New record</h2></div>
+    <div class="dlg-body" id="record-fields"></div>
+    <div class="error" id="record-error" style="margin:0 20px 12px" hidden></div>
+    <div class="dlg-foot">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" class="quiet" id="record-cancel">Cancel</button>
+      <span class="spacer"></span>
+      <button type="button" class="danger" id="record-delete">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="help" aria-labelledby="help-title">
+  <div class="dlg-head">
+    <h2 id="help-title">Using CRUDulator</h2>
+    <button type="button" class="quiet" id="help-close">Close</button>
+  </div>
+  <div class="help-body">
+    <p>CRUDulator turns a SQLite table into a simple data-entry application: list, search, add, edit and delete records. It opens with a sample <code>contacts</code> table so you can try it.</p>
+
+    <h3>Designing a table</h3>
+    <ul>
+      <li>Click <b>New table</b>, give it a name, and add columns. Each column has a type and can be marked <b>Required</b>.</li>
+      <li>Types: <b>Text</b>, <b>Long text</b> (a multi-line box), <b>Whole number</b>, <b>Decimal number</b>, <b>Date</b> and <b>Yes / No</b>.</li>
+      <li>An <code>id</code> column is added for you and numbered automatically.</li>
+      <li>The SQL that will run is shown before you save it.</li>
+      <li><b>Edit table design</b> lets you rename a table, add columns, remove columns or delete the whole table.</li>
+    </ul>
+
+    <h3>Working with records</h3>
+    <ul>
+      <li>Click <b>New record</b> to add one, or click any row to edit or delete it.</li>
+      <li>Type in the search box to show only rows where any column contains that text.</li>
+      <li>Click a column heading to sort by it; click again to reverse the order.</li>
+      <li>The list shows up to 500 rows at a time. Search to narrow it down.</li>
+    </ul>
+
+    <h3>Opening and saving</h3>
+    <p>Everything happens in your browser; nothing is uploaded. <b>Open database…</b> (or dropping a file onto the page) loads an existing SQLite file, and you can work with any of its tables. Your changes are held in memory until you click <b>Download database</b>. The file name shows <i>Unsaved changes</i> when there is something to download.</p>
+    <p>When the page is opened inside Claude, the database is saved inside a <code>.zip</code> file, because Claude doesn't allow <code>.db</code> downloads directly.</p>
+
+    <h3>Requirements</h3>
+    <p>The page loads sql.js and JSZip from cdnjs, so it needs an internet connection when it first opens.</p>
+  </div>
+</dialog>
+
+<script>
+(async () => {
+  const $ = id => document.getElementById(id);
+  const SQL = await initSqlJs();
+
+  // Column types offered in the designer. The declared SQLite type is what we store,
+  // so a table reopened later (or made by another tool) still gets the right form fields.
+  const TYPES = [
+    { key: 'TEXT',     label: 'Text' },
+    { key: 'LONGTEXT', label: 'Long text' },
+    { key: 'INTEGER',  label: 'Whole number' },
+    { key: 'REAL',     label: 'Decimal number' },
+    { key: 'DATE',     label: 'Date' },
+    { key: 'BOOLEAN',  label: 'Yes / No' },
+  ];
+  const typeLabel = k => (TYPES.find(t => t.key === k) || TYPES[0]).label;
+  function kindOf(decl) {
+    const t = (decl || '').toUpperCase();
+    if (t.includes('BOOL')) return 'BOOLEAN';
+    if (t === 'DATE') return 'DATE';
+    if (t.includes('INT')) return 'INTEGER';
+    if (t.includes('LONGTEXT')) return 'LONGTEXT';
+    if (/CHAR|CLOB|TEXT/.test(t)) return 'TEXT';
+    if (/REAL|FLOA|DOUB|NUMERIC|DECIMAL/.test(t)) return 'REAL';
+    return 'TEXT';
+  }
+  const IDENT = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+  let db = null, fileName = 'crud.db', isSample = false, dirty = false;
+  let table = null, sort = { col: null, dir: 'ASC' }, search = '';
+  let editingRowid = null;
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function qid(name) { return '"' + String(name).replace(/"/g, '""') + '"'; }
+  function fmtBytes(n) { return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+  function query(sql, params) { const r = db.exec(sql, params); return r.length ? r[0] : { columns: [], values: [] }; }
+
+  // ---------- database lifecycle ----------
+  function setDb(next, name, sample) {
+    if (db) db.close();
+    db = next; fileName = name; isSample = sample; dirty = false;
+    table = null; sort = { col: null, dir: 'ASC' }; search = ''; $('search').value = '';
+    showFileInfo();
+    refreshTables();
+  }
+  function markDirty() { dirty = true; showFileInfo(); }
+  function showFileInfo() {
+    const size = fmtBytes(db.export().length);
+    $('file-info').innerHTML = '<b>' + esc(fileName) + '</b> · ' + size +
+      (isSample ? '<span class="tag">Sample data</span>' : '') +
+      (dirty ? '<span class="tag dirty">Unsaved changes</span>' : '');
+  }
+  window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  function openBytes(bytes, name) {
+    let next;
+    try { next = new SQL.Database(bytes); next.exec('SELECT count(*) FROM sqlite_master'); }
+    catch (e) { alert('That file could not be opened as a SQLite database:\n' + e.message); return; }
+    setDb(next, name, false);
+  }
+  function readFile(file) {
+    if (dirty && !confirm('You have unsaved changes. Open another database anyway?')) return;
+    const reader = new FileReader();
+    reader.onload = () => openBytes(new Uint8Array(reader.result), file.name);
+    reader.onerror = () => alert('The file could not be read.');
+    reader.readAsArrayBuffer(file);
+  }
+
+  // ---------- schema helpers ----------
+  function listTables() {
+    return query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").values.map(r => r[0]);
+  }
+  function getColumns(t) {
+    const cols = query('PRAGMA table_info(' + qid(t) + ')').values.map(([, name, decl, notnull, dflt, pk]) =>
+      ({ name, decl, kind: kindOf(decl), notnull: !!notnull, dflt, pk: !!pk }));
+    const pks = cols.filter(c => c.pk);
+    // A single INTEGER PRIMARY KEY is SQLite's rowid: numbered automatically, so the form leaves it out.
+    for (const c of cols) c.auto = pks.length === 1 && c.pk && (c.decl || '').toUpperCase() === 'INTEGER';
+    return cols;
+  }
+
+  function refreshTables(select) {
+    const tables = listTables();
+    if (select) table = select;
+    if (!tables.includes(table)) table = tables[0] || null;
+    const sel = $('table-select');
+    sel.innerHTML = tables.map(t => '<option' + (t === table ? ' selected' : '') + '>' + esc(t) + '</option>').join('');
+    sel.disabled = !tables.length;
+    $('design-btn').disabled = !tables.length;
+    showView(tables.length ? 'data' : 'empty');
+  }
+
+  function showView(v) {
+    $('data-view').hidden = v !== 'data';
+    $('empty-view').hidden = v !== 'empty';
+    $('design-view').hidden = v !== 'design';
+    if (v === 'data') renderGrid();
+  }
+
+  // ---------- data view ----------
+  function renderGrid() {
+    const grid = $('grid');
+    const cols = getColumns(table);
+    const params = [];
+    let where = '';
+    if (search) {
+      where = ' WHERE ' + cols.map(c => 'CAST(' + qid(c.name) + ' AS TEXT) LIKE ?').join(' OR ');
+      for (const _ of cols) params.push('%' + search + '%');
+    }
+    const order = sort.col ? ' ORDER BY ' + qid(sort.col) + ' ' + sort.dir : ' ORDER BY rowid';
+    let total, res;
+    try {
+      total = query('SELECT count(*) FROM ' + qid(table) + where, params).values[0][0];
+      res = query('SELECT rowid AS __rowid__, * FROM ' + qid(table) + where + order + ' LIMIT 500', params);
+    } catch (e) {
+      grid.innerHTML = '<div class="note error" style="margin:14px">' + esc(e.message) + '</div>';
+      $('count').textContent = '';
+      return;
+    }
+    const all = query('SELECT count(*) FROM ' + qid(table)).values[0][0];
+    $('count').textContent = search ? total + ' of ' + all + ' record' + (all === 1 ? '' : 's') : all + ' record' + (all === 1 ? '' : 's');
+
+    if (!res.values.length) {
+      grid.innerHTML = '<div class="empty"><p>' + (search ? 'No records match “' + esc(search) + '”.' : 'No records yet.') + '</p>' +
+        (search ? '' : '<button type="button" class="primary" data-new>Add the first record</button>') + '</div>';
+      grid.querySelector('[data-new]')?.addEventListener('click', () => openRecord(null));
+      return;
+    }
+    let html = '<table class="grid"><thead><tr>' + cols.map(c => {
+      const arrow = sort.col === c.name ? '<span class="arrow">' + (sort.dir === 'ASC' ? '▲' : '▼') + '</span>' : '';
+      const ariaSort = sort.col === c.name ? ' aria-sort="' + (sort.dir === 'ASC' ? 'ascending' : 'descending') + '"' : '';
+      return '<th' + ariaSort + '><button type="button" data-sort="' + esc(c.name) + '">' + esc(c.name) + arrow + '</button></th>';
+    }).join('') + '</tr></thead><tbody>';
+    for (const row of res.values) {
+      html += '<tr tabindex="0" data-rowid="' + row[0] + '">' + cols.map((c, i) => {
+        const v = row[i + 1];
+        if (v === null) return '<td class="null"></td>';
+        if (c.kind === 'BOOLEAN') return '<td>' + (Number(v) ? 'Yes' : 'No') + '</td>';
+        if (v instanceof Uint8Array) return '<td class="null">BLOB ' + v.length + ' B</td>';
+        if (typeof v === 'number') return '<td class="num">' + v + '</td>';
+        return '<td title="' + esc(v) + '">' + esc(v) + '</td>';
+      }).join('') + '</tr>';
+    }
+    html += '</tbody></table>';
+    if (total > res.values.length) html += '<div class="note">Showing the first 500 of ' + total + '. Search to narrow the list.</div>';
+    grid.innerHTML = html;
+  }
+
+  $('grid').addEventListener('click', e => {
+    const s = e.target.closest('[data-sort]');
+    if (s) {
+      const col = s.dataset.sort;
+      sort = sort.col === col ? { col, dir: sort.dir === 'ASC' ? 'DESC' : 'ASC' } : { col, dir: 'ASC' };
+      renderGrid();
+      return;
+    }
+    const tr = e.target.closest('tr[data-rowid]');
+    if (tr) openRecord(Number(tr.dataset.rowid));
+  });
+  $('grid').addEventListener('keydown', e => {
+    const tr = e.target.closest('tr[data-rowid]');
+    if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openRecord(Number(tr.dataset.rowid)); }
+  });
+  let searchTimer;
+  $('search').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { search = e.target.value.trim(); renderGrid(); }, 150);
+  });
+  $('table-select').addEventListener('change', e => {
+    table = e.target.value; sort = { col: null, dir: 'ASC' }; search = ''; $('search').value = '';
+    showView('data');
+  });
+
+  // ---------- record form ----------
+  const recordDlg = $('record-dlg');
+  function openRecord(rowid) {
+    editingRowid = rowid;
+    const cols = getColumns(table);
+    let values = {};
+    if (rowid !== null) {
+      const r = query('SELECT * FROM ' + qid(table) + ' WHERE rowid = ?', [rowid]);
+      if (!r.values.length) return;
+      r.columns.forEach((c, i) => values[c] = r.values[0][i]);
+    }
+    const autoCol = cols.find(c => c.auto);
+    $('record-title').textContent = rowid === null ? 'New ' + table + ' record'
+      : 'Edit ' + table + (autoCol ? ' #' + values[autoCol.name] : ' record');
+    $('record-delete').hidden = rowid === null;
+    $('record-error').hidden = true;
+
+    const box = $('record-fields');
+    box.innerHTML = '';
+    cols.filter(c => !c.auto).forEach((c, i) => {
+      const id = 'f' + i, v = values[c.name];
+      const required = c.notnull && c.dflt === null && c.kind !== 'BOOLEAN';
+      const label = esc(c.name) + (required ? ' <span class="req-mark" aria-hidden="true">*</span>' : '');
+      let html;
+      if (c.kind === 'BOOLEAN') {
+        html = '<label class="check"><input type="checkbox" id="' + id + '"' + (Number(v) ? ' checked' : '') + '> ' + esc(c.name) + '</label>';
+      } else if (c.kind === 'LONGTEXT') {
+        html = '<label class="field"><span>' + label + '</span><textarea id="' + id + '"' + (required ? ' required' : '') + '>' + esc(v ?? '') + '</textarea></label>';
+      } else {
+        const type = c.kind === 'INTEGER' || c.kind === 'REAL' ? 'number' : c.kind === 'DATE' ? 'date' : 'text';
+        const step = c.kind === 'INTEGER' ? ' step="1"' : c.kind === 'REAL' ? ' step="any"' : '';
+        html = '<label class="field"><span>' + label + '</span><input type="' + type + '"' + step + ' id="' + id + '"' +
+          (required ? ' required' : '') + ' value="' + esc(v ?? '') + '"' + (type === 'number' ? ' class="code"' : '') + '></label>';
+      }
+      box.insertAdjacentHTML('beforeend', html);
+      box.lastElementChild.querySelector('input,textarea').dataset.col = c.name;
+    });
+    if (!box.childElementCount) box.innerHTML = '<p class="hint">This table has no columns to fill in.</p>';
+    recordDlg.showModal();
+    box.querySelector('input,textarea')?.focus();
+  }
+
+  function readField(el, kind) {
+    if (kind === 'BOOLEAN') return el.checked ? 1 : 0;
+    const s = el.value.trim();
+    if (s === '') return null;
+    if (kind === 'INTEGER') return parseInt(s, 10);
+    if (kind === 'REAL') return parseFloat(s);
+    return s;
+  }
+
+  $('record-form').addEventListener('submit', e => {
+    e.preventDefault();
+    if (!$('record-form').reportValidity()) return;
+    const cols = getColumns(table);
+    const names = [], vals = [];
+    for (const el of $('record-fields').querySelectorAll('[data-col]')) {
+      const c = cols.find(c => c.name === el.dataset.col);
+      names.push(c.name); vals.push(readField(el, c.kind));
+    }
+    try {
+      if (editingRowid === null) {
+        db.run(names.length
+          ? 'INSERT INTO ' + qid(table) + ' (' + names.map(qid).join(', ') + ') VALUES (' + names.map(() => '?').join(', ') + ')'
+          : 'INSERT INTO ' + qid(table) + ' DEFAULT VALUES', vals);
+      } else if (names.length) {
+        db.run('UPDATE ' + qid(table) + ' SET ' + names.map(n => qid(n) + ' = ?').join(', ') + ' WHERE rowid = ?', [...vals, editingRowid]);
+      }
+    } catch (err) {
+      $('record-error').textContent = err.message; $('record-error').hidden = false;
+      return;
+    }
+    recordDlg.close(); markDirty(); renderGrid();
+  });
+  $('record-cancel').addEventListener('click', () => recordDlg.close());
+  $('record-delete').addEventListener('click', () => {
+    if (!confirm('Delete this record? This can’t be undone.')) return;
+    try { db.run('DELETE FROM ' + qid(table) + ' WHERE rowid = ?', [editingRowid]); }
+    catch (err) { $('record-error').textContent = err.message; $('record-error').hidden = false; return; }
+    recordDlg.close(); markDirty(); renderGrid();
+  });
+  $('new-record-btn').addEventListener('click', () => openRecord(null));
+
+  // ---------- table designer ----------
+  // mode 'new': CREATE TABLE. mode 'edit': rename, add columns, drop columns, or delete the table.
+  let design = null;
+
+  function typeOptions(selected) {
+    return TYPES.map(t => '<option value="' + t.key + '"' + (t.key === selected ? ' selected' : '') + '>' + t.label + '</option>').join('');
+  }
+  function addColRow(name = '', kind = 'TEXT', required = false) {
+    const row = document.createElement('div');
+    row.className = 'col-row';
+    row.innerHTML = '<input type="text" class="code" placeholder="column_name" aria-label="Column name" autocomplete="off" spellcheck="false">' +
+      '<select aria-label="Column type">' + typeOptions(kind) + '</select>' +
+      '<input type="checkbox" aria-label="Required"' + (required ? ' checked' : '') + (design.mode === 'edit' ? ' disabled' : '') + '>' +
+      '<button type="button" class="icon" aria-label="Remove column">✕</button>';
+    row.querySelector('input').value = name;
+    row.querySelector('button').addEventListener('click', () => { row.remove(); updateSql(); });
+    $('d-cols').append(row);
+    return row;
+  }
+
+  function openDesigner(mode) {
+    design = { mode, original: mode === 'edit' ? table : null, drop: new Set() };
+    $('d-cols').innerHTML = '';
+    $('d-error').hidden = true;
+    $('d-alter-hint').hidden = mode !== 'edit';
+    $('d-drop').hidden = mode !== 'edit';
+    $('d-save').textContent = mode === 'edit' ? 'Save changes' : 'Create table';
+    if (mode === 'new') {
+      $('d-name').value = '';
+      addColRow();
+    } else {
+      $('d-name').value = table;
+      for (const c of getColumns(table)) {
+        const row = document.createElement('div');
+        row.className = 'col-row fixed';
+        row.innerHTML = '<span>' + esc(c.name) + '</span><span>' + (c.auto ? 'Auto number' : typeLabel(c.kind)) + '</span>' +
+          '<span class="req">' + (c.notnull && !c.pk ? '✓' : '') + '</span>' +
+          (c.pk ? '<span></span>' : '<button type="button" class="icon" aria-label="Remove column ' + esc(c.name) + '">✕</button>');
+        const btn = row.querySelector('button');
+        if (btn) btn.addEventListener('click', () => {
+          const dropping = design.drop.has(c.name);
+          dropping ? design.drop.delete(c.name) : design.drop.add(c.name);
+          row.classList.toggle('dropping', !dropping);
+          btn.textContent = dropping ? '✕' : '↺';
+          btn.setAttribute('aria-label', (dropping ? 'Remove column ' : 'Keep column ') + c.name);
+          updateSql();
+        });
+        $('d-cols').append(row);
+      }
+    }
+    showView('design');
+    updateSql();
+    $('d-name').focus();
+  }
+
+  function newColumns() {
+    return [...$('d-cols').querySelectorAll('.col-row:not(.fixed)')].map(r => ({
+      name: r.querySelector('input[type=text]').value.trim(),
+      kind: r.querySelector('select').value,
+      required: r.querySelector('input[type=checkbox]').checked,
+    }));
+  }
+
+  // Returns { sql: [...statements], error } for the current designer state.
+  function buildDesign() {
+    const name = $('d-name').value.trim();
+    const cols = newColumns().filter(c => c.name);
+    const stmts = [];
+    if (!name) return { sql: stmts, error: 'Give the table a name.' };
+    if (!IDENT.test(name)) return { sql: stmts, error: 'Table names may only contain letters, digits and underscores, and must start with a letter.' };
+    const existingTables = listTables().map(t => t.toLowerCase());
+    const renaming = design.mode === 'edit' && name !== design.original;
+    if ((design.mode === 'new' || renaming) && existingTables.includes(name.toLowerCase()) && name.toLowerCase() !== (design.original || '').toLowerCase())
+      return { sql: stmts, error: 'There is already a table called ' + name + '.' };
+
+    const taken = design.mode === 'edit' ? getColumns(design.original).filter(c => !design.drop.has(c.name)).map(c => c.name.toLowerCase()) : ['id'];
+    for (const c of cols) {
+      if (!IDENT.test(c.name)) return { sql: stmts, error: 'Column “' + c.name + '”: names may only contain letters, digits and underscores, and must start with a letter.' };
+      if (taken.includes(c.name.toLowerCase())) return { sql: stmts, error: 'There is more than one column called ' + c.name + '.' };
+      taken.push(c.name.toLowerCase());
+    }
+    const colDef = c => qid(c.name) + ' ' + c.kind + (c.required ? ' NOT NULL' : '');
+
+    if (design.mode === 'new') {
+      if (!cols.length) return { sql: stmts, error: 'Add at least one column.' };
+      stmts.push('CREATE TABLE ' + qid(name) + ' (\n  "id" INTEGER PRIMARY KEY' + cols.map(c => ',\n  ' + colDef(c)).join('') + '\n);');
+    } else {
+      const t = qid(design.original);
+      if (renaming) stmts.push('ALTER TABLE ' + t + ' RENAME TO ' + qid(name) + ';');
+      const tt = qid(name);
+      for (const d of design.drop) stmts.push('ALTER TABLE ' + tt + ' DROP COLUMN ' + qid(d) + ';');
+      for (const c of cols) stmts.push('ALTER TABLE ' + tt + ' ADD COLUMN ' + colDef({ ...c, required: false }) + ';');
+      if (!stmts.length) return { sql: stmts, error: null, nothing: true };
+    }
+    return { sql: stmts, error: null };
+  }
+
+  function updateSql() {
+    const { sql, error, nothing } = buildDesign();
+    $('d-sql').textContent = sql.length ? sql.join('\n') : nothing ? '-- No changes yet' : '-- Fill in the table name and columns';
+    $('d-save').disabled = !!nothing;
+    if (!error) $('d-error').hidden = true;
+  }
+  $('design-view').addEventListener('input', updateSql);
+  $('design-view').addEventListener('change', updateSql);
+  $('d-add-col').addEventListener('click', () => { addColRow().querySelector('input').focus(); updateSql(); });
+
+  $('design-view').addEventListener('submit', e => {
+    e.preventDefault();
+    const { sql, error } = buildDesign();
+    if (error) { $('d-error').textContent = error; $('d-error').hidden = false; return; }
+    if (design.drop.size && !confirm('Removing ' + [...design.drop].join(', ') + ' deletes the data in ' + (design.drop.size === 1 ? 'that column' : 'those columns') + '. Continue?')) return;
+    try {
+      db.exec('BEGIN');
+      for (const s of sql) db.exec(s);
+      db.exec('COMMIT');
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch (_) {}
+      $('d-error').textContent = err.message; $('d-error').hidden = false;
+      return;
+    }
+    markDirty();
+    sort = { col: null, dir: 'ASC' };
+    refreshTables($('d-name').value.trim());
+  });
+  $('d-cancel').addEventListener('click', () => refreshTables());
+  $('d-drop').addEventListener('click', () => {
+    if (!confirm('Delete the table ' + design.original + ' and all its records? This can’t be undone.')) return;
+    db.exec('DROP TABLE ' + qid(design.original));
+    markDirty();
+    refreshTables();
+  });
+
+  $('design-btn').addEventListener('click', () => openDesigner('edit'));
+  $('new-table-btn').addEventListener('click', () => openDesigner('new'));
+  $('first-table-btn').addEventListener('click', () => openDesigner('new'));
+
+  // ---------- file actions ----------
+  $('new-db-btn').addEventListener('click', () => {
+    if (dirty && !confirm('You have unsaved changes. Start a new database anyway?')) return;
+    setDb(new SQL.Database(), 'crud.db', false);
+  });
+  $('open-btn').addEventListener('click', () => $('file-input').click());
+  $('file-input').addEventListener('change', e => { if (e.target.files[0]) readFile(e.target.files[0]); e.target.value = ''; });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) readFile(f); });
+
+  // Download: inside Claude use the downloads capability (zip, since .db isn't an allowed type);
+  // anywhere else, an ordinary .db download.
+  const downloadsP = window.claude?.use ? window.claude.use('downloads') : Promise.resolve(null);
+  $('save-btn').addEventListener('click', async () => {
+    const bytes = db.export();
+    const downloads = await downloadsP;
+    if (downloads) {
+      try {
+        const zip = new JSZip();
+        zip.file(fileName, bytes);
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        await downloads.save({ filename: fileName.replace(/\.[^.]*$/, '') + '.zip', data: blob });
+      } catch (e) {
+        if (!(e && e.code === 'declined')) alert('Download failed: ' + (e && e.message || e));
+        return;
+      }
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.sqlite3' }));
+      a.download = fileName;
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+    dirty = false; isSample = false; showFileInfo();
+  });
+
+  const helpDlg = $('help');
+  $('help-btn').addEventListener('click', () => helpDlg.showModal());
+  $('help-close').addEventListener('click', () => helpDlg.close());
+  for (const d of [helpDlg, recordDlg]) d.addEventListener('click', e => { if (e.target === d) d.close(); });
+
+  // ---------- sample database so the page opens in a working state ----------
+  const sample = new SQL.Database();
+  sample.exec(`
+    CREATE TABLE "contacts" (
+      "id" INTEGER PRIMARY KEY,
+      "name" TEXT NOT NULL,
+      "email" TEXT,
+      "phone" TEXT,
+      "birthday" DATE,
+      "active" BOOLEAN,
+      "notes" LONGTEXT
+    );
+    INSERT INTO contacts (name, email, phone, birthday, active, notes) VALUES
+      ('Ada Lovelace', 'ada@example.com', '01234 567890', '1815-12-10', 1, 'Wrote the first published algorithm.'),
+      ('Alan Turing', 'alan@example.com', NULL, '1912-06-23', 1, NULL),
+      ('Grace Hopper', 'grace@example.com', '01234 111222', '1906-12-09', 0, 'Popularised the term "debugging".'),
+      ('Edsger Dijkstra', NULL, NULL, '1930-05-11', 1, NULL);
+  `);
+  setDb(sample, 'contacts.db', true);
+})();
+</script>
+</body>
+</html>

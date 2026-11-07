@@ -16,4 +16,20 @@ Open a SQLite database file in your browser, browse its tables and columns, and 
 - Changes affect an in-memory copy only. Click **Download database** to save them.
 - Your file is never uploaded: SQLite runs in the browser via [sql.js](https://github.com/sql-js/sql.js).
 
-Needs an internet connection on first load, to fetch sql.js and JSZip from cdnjs.
+### CRUDulator — `crudulator.html`
+
+**[Open CRUDulator](https://romilly.github.io/browser-based-tools/crudulator.html)**
+
+Design a SQLite table and get a simple data-entry application for it: list, search, add, edit and delete records.
+
+- **Design a table:** give it a name and columns. Each column has a type (Text, Long text, Whole number, Decimal number, Date, Yes / No) and can be required. An auto-numbered `id` is added for you, and the SQL is shown before it runs.
+- **Change a design:** rename the table, add or remove columns, or delete the table.
+- **Work with records:** a sortable, searchable list. Click a row to edit or delete it; forms use the right input for each type.
+- **Open existing databases:** any SQLite file works, and you can pick which of its tables to work with.
+- Changes are held in memory until you click **Download database**.
+
+It handles one table at a time for now; multiple tables and screen designers are planned.
+
+---
+
+Both tools need an internet connection on first load, to fetch sql.js and JSZip from cdnjs.
