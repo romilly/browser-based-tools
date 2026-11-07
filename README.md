@@ -6,6 +6,8 @@ Small, self-contained tools that run entirely in a web browser. Each tool is a s
 
 ### SQLite Browser — `sqlite-browser.html`
 
+**[Open the SQLite Browser](https://romilly.github.io/browser-based-tools/sqlite-browser.html)**
+
 Open a SQLite database file in your browser, browse its tables and columns, and run SQL against it.
 
 - Open a `.db` / `.sqlite` file with the button, or drag it onto the page. A small sample database loads at startup so you can try it straight away.
