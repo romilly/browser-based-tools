@@ -133,6 +133,8 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <button id="bSib" title="Add sibling (Enter)">Sibling<kbd>↵</kbd></button>
     <button id="bEdit" title="Edit title (F2 or double-click)">Edit<kbd>F2</kbd></button>
     <button id="bFold" title="Fold or unfold (Space)">Fold<kbd>Space</kbd></button>
+    <button id="bUp" title="Move branch up (Ctrl+↑)" aria-label="Move branch up">Up</button>
+    <button id="bDown" title="Move branch down (Ctrl+↓)" aria-label="Move branch down">Down</button>
     <button id="bConnect" title="Connect to another node (C)">Connect<kbd>C</kbd></button>
     <button id="bDel" class="danger" title="Delete branch (Delete)">Delete<kbd>Del</kbd></button>
   </div>
@@ -201,6 +203,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>Type a web link for the selected node.</dd>
         <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Move towards or away from the root.</dd>
         <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move between siblings.</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move the selected branch up or down among its siblings. The <b>Up</b> and <b>Down</b> buttons do the same.</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo. <kbd>Ctrl</kbd>+<kbd>Y</kbd> redoes.</dd>
         <dt><kbd>?</kbd></dt><dd>Open this help.</dd>
       </dl>
@@ -282,6 +285,11 @@ function sideOf(n) {
   if (n === root) return null;
   let p = n; while (parents.get(p.id) !== root) p = parents.get(p.id);
   return p.side || 'right';
+}
+// The siblings a node moves among: for a main branch, only those on its side of the root.
+function sibsOf(n) {
+  const p = parents.get(n.id);
+  return p === root ? p.children.filter(c => (c.side || 'right') === (n.side || 'right')) : p.children;
 }
 function balanceSide() {
   const r = root.children.filter(c => c.side !== 'left').length;
@@ -494,6 +502,9 @@ function showSelection() {
   $('#bDel').disabled = !c && sel === root;
   $('#bConnect').disabled = !!c;
   $('#bFold').disabled = !sel.children.length || sel === root;
+  const sibs = sel === root ? [] : sibsOf(sel);
+  $('#bUp').disabled = !!c || !sibs.length || sibs[0] === sel;
+  $('#bDown').disabled = !!c || !sibs.length || sibs[sibs.length - 1] === sel;
   $('#bUndo').disabled = !undoStack.length; $('#bRedo').disabled = !redoStack.length;
 }
 function select(n) {
@@ -570,6 +581,15 @@ function finishConnect(target) {
   changed();
   $('#connLabel').focus();
 }
+function moveBranch(step) {
+  if (sel === root) return;
+  const sibs = sibsOf(sel), other = sibs[sibs.indexOf(sel) + step];
+  if (!other) return;
+  snapshot();
+  const all = parents.get(sel.id).children, i = all.indexOf(sel), j = all.indexOf(other);
+  [all[i], all[j]] = [all[j], all[i]];
+  changed();
+}
 function toggleFold() {
   if (sel === root || !sel.children.length) return;
   snapshot(); sel.folded = !sel.folded; changed();
@@ -620,8 +640,7 @@ function navigate(key) {
     else if (side === 'left') toChild('left');
     else select(parents.get(sel.id));
   } else if (sel !== root) {
-    const p = parents.get(sel.id);
-    const sibs = p === root ? p.children.filter(c => (c.side || 'right') === side) : p.children;
+    const sibs = sibsOf(sel);
     const i = sibs.indexOf(sel) + (key === 'ArrowDown' ? 1 : -1);
     if (sibs[i]) select(sibs[i]);
   }
@@ -766,6 +785,8 @@ $('#bChild').onclick = addChild;
 $('#bSib').onclick = addSibling;
 $('#bEdit').onclick = () => startEdit();
 $('#bFold').onclick = toggleFold;
+$('#bUp').onclick = () => moveBranch(-1);
+$('#bDown').onclick = () => moveBranch(1);
 $('#bConnect').onclick = startConnect;
 $('#connDel').onclick = () => { if (currentConn()) delConn(); };
 $('#bDel').onclick = del;
@@ -845,6 +866,9 @@ document.addEventListener('keydown', e => {
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (ctrl && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+  if (ctrl && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault(); if (selConn) select(sel); moveBranch(e.key === 'ArrowUp' ? -1 : 1); return;
+  }
   if (ctrl && e.key.toLowerCase() === 'k') { e.preventDefault(); if (selConn) select(sel); linkIn.focus(); linkIn.select(); return; }
   if (e.key === 'Escape') { if (connectFrom) cancelConnect(); else if (selConn) select(sel); return; }
   if (ctrl || e.altKey) return;

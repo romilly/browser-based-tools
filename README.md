@@ -45,6 +45,7 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 - **Web links:** type an address in the Link box to attach it to a branch (`https://` is added if you leave it out). The branch shows a link icon that opens the page in a new tab.
 - **Connectors:** a dashed arrow from any branch to any other, with an optional label, like Freeplane's connectors. Select the first branch, choose **Connect** (or press C), then click the second. Click a connector to change its label or delete it.
 - **Fold branches:** Space folds or unfolds a branch. A folded branch shows a circle with the number of hidden nodes; click it to unfold.
+- **Reorder branches:** Ctrl+↑ and Ctrl+↓ (or the **Up** and **Down** buttons) move the selected branch up or down among its siblings. A main branch stays on its own side of the centre.
 - **Move around:** the arrow keys move between branches, and you can drag the empty space (or swipe) to scroll the map.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the toolbar buttons.
 - **Help:** the Help button, or `?`, lists every action.

@@ -255,6 +255,67 @@ def test_links_and_connectors_are_saved_and_opened(mm, tmp_path):
     assert read_zip(mm.save(tmp_path / 'b')) == read_zip(first)
 
 
+CRUD_KIDS = ['Foreign keys', 'Multiple tables', 'Screen designer', 'Demo video']
+
+
+def crud_kids(mm):
+    titles = mm.titles()
+    i = titles.index('CRUDulator') + 1
+    return titles[i:i + 4]
+
+
+# ---------- moving branches up and down ----------
+
+def test_ctrl_up_moves_a_branch_above_its_previous_sibling(mm):
+    mm.node('Multiple tables').click()
+    mm.page.keyboard.press('Control+ArrowUp')
+    assert crud_kids(mm) == ['Multiple tables', 'Foreign keys', 'Screen designer', 'Demo video']
+    assert 'sel' in mm.node('Multiple tables').get_attribute('class')
+
+
+def test_ctrl_down_moves_a_branch_below_its_next_sibling(mm):
+    mm.node('Foreign keys').click()
+    mm.page.keyboard.press('Control+ArrowDown')
+    mm.page.keyboard.press('Control+ArrowDown')
+    assert crud_kids(mm) == ['Multiple tables', 'Screen designer', 'Foreign keys', 'Demo video']
+
+
+def test_a_branch_at_the_end_stays_put_and_its_button_is_disabled(mm):
+    mm.node('Foreign keys').click()
+    assert mm.page.is_disabled('#bUp')
+    mm.page.keyboard.press('Control+ArrowUp')
+    mm.node('Demo video').click()
+    assert mm.page.is_disabled('#bDown')
+    mm.page.keyboard.press('Control+ArrowDown')
+    assert crud_kids(mm) == CRUD_KIDS
+    assert mm.page.is_disabled('#bUndo')
+
+
+def test_the_buttons_move_branches_too(mm):
+    mm.node('Screen designer').click()
+    mm.page.click('#bUp')
+    assert crud_kids(mm) == ['Foreign keys', 'Screen designer', 'Multiple tables', 'Demo video']
+    mm.page.click('#bDown')
+    assert crud_kids(mm) == CRUD_KIDS
+
+
+def test_main_branches_move_only_within_their_side_of_the_root(mm, tmp_path):
+    mm.node('SQLite browser').click()        # top of the left side
+    assert mm.page.is_disabled('#bUp')
+    mm.node('Mind map editor').click()       # bottom of the right side
+    assert mm.page.is_disabled('#bDown')
+    mm.page.keyboard.press('Control+ArrowUp')
+    _, data = read_zip(mm.save(tmp_path))
+    assert child_titles(data['root']) == ['Mind map editor', 'CRUDulator', 'SQLite browser', 'Repo housekeeping']
+
+
+def test_undo_puts_a_moved_branch_back(mm):
+    mm.node('Demo video').click()
+    mm.page.keyboard.press('Control+ArrowUp')
+    mm.page.click('#bUndo')
+    assert crud_kids(mm) == CRUD_KIDS
+
+
 def test_a_connector_to_a_missing_node_is_reported(mm, tmp_path):
     before = mm.titles()
     mm.open(write_zip(tmp_path / 'bad.zip', """
