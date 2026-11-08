@@ -12,6 +12,14 @@
           "type": "string",
           "description": "The display text for the node"
         },
+        "icons": {
+          "type": "array",
+          "description": "Icons shown before the title, in order, by Freeplane's built-in icon names (such as 'idea', 'yes' or 'full-1')",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "note": {
           "type": "string",
           "description": "Rich text note attached to the node"

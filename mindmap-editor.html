@@ -16,6 +16,7 @@
   --conn:#6f7f93;
   --ui:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --emoji:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#121819; --canvas:#172022; --fg:#e2eaec; --muted:#93a4a9; --line:#2b383b;
@@ -51,6 +52,30 @@ button:disabled{opacity:.45;cursor:default;border-color:var(--line)}
 button.danger{color:var(--danger)}
 button kbd{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
 
+#toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+#toolbar .group + .group{padding-left:12px;border-left:1px solid var(--line)}
+
+/* Menu bar: File and Icons open a pop-up panel below their button */
+#menubar{display:flex;align-items:center;gap:2px}
+.menu{position:relative}
+button.mb{border-color:transparent;background:transparent;font-weight:500}
+button.mb:hover{border-color:var(--line)}
+button.mb[aria-expanded="true"]{background:var(--sel);border-color:var(--line)}
+.pop{position:absolute;left:0;top:calc(100% + 4px);z-index:25;background:var(--canvas);border:1px solid var(--line);
+  border-radius:7px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:190px}
+.pop > button{border-color:transparent;background:transparent;text-align:left;display:flex;justify-content:space-between;gap:20px;padding:7px 10px}
+.pop > button:hover:not(:disabled){background:var(--sel)}
+#mIcons{width:min(360px,calc(100vw - 24px));box-sizing:border-box;max-height:min(calc(100vh - 110px),640px)}
+#iconGrid{flex:1;min-height:0;overflow:auto}
+#iFor{font-size:12.5px;color:var(--muted);padding:2px 4px 4px;overflow-wrap:anywhere}
+#iFor b{color:var(--fg);font-weight:600}
+#iconGrid h4{margin:6px 4px 2px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+#iconGrid .row{display:flex;flex-wrap:wrap;gap:2px}
+#iconGrid button{width:36px;height:36px;padding:0;font:19px/1 var(--emoji);border-color:transparent;background:transparent;display:grid;place-items:center}
+#iconGrid button:hover{background:var(--sel)}
+#iconGrid button[aria-pressed="true"]{background:var(--sel);border-color:var(--accent)}
+#iClear{margin-top:6px;border-top:1px solid var(--line)!important;border-radius:0 0 5px 5px}
+
 main{flex:1;display:flex;min-height:0}
 #vp{flex:1;overflow:auto;position:relative;background:var(--canvas);min-width:0;cursor:default;touch-action:manipulation}
 #vp.panning{cursor:grabbing}
@@ -68,6 +93,8 @@ main{flex:1;display:flex;min-height:0}
 .node.editing{cursor:text;user-select:text;background:var(--sel);box-shadow:0 0 0 1px var(--accent)}
 .node.editing .t{min-width:4ch}
 .ni{flex:none;margin-top:3px;color:var(--muted)}
+.ic{flex:none;font-family:var(--emoji);font-size:.95em}
+.ic + .t{margin-left:1px}
 .li{flex:none;display:inline-flex;margin-top:2px;color:var(--accent);border-radius:3px}
 .li:hover{background:var(--sel)}
 .li:focus-visible{outline:2px solid var(--accent)}
@@ -120,6 +147,9 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
   aside{width:auto;border-left:0;border-top:1px solid var(--line);height:34%;flex:none;
     padding-left:max(16px,env(safe-area-inset-left,0px))}
   button kbd{display:none}
+  header > .sep{display:none}
+  #toolbar{width:100%}
+  #toolbar .group + .group{border-left:0;padding-left:0}
 }
 @media (prefers-reduced-motion:no-preference){ .node{transition:background-color .12s} }
 </style>
@@ -128,6 +158,27 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
 
 <header>
   <h1>Mind Map Editor</h1>
+  <nav id="menubar">
+    <div class="menu">
+      <button class="mb" id="mbFile" aria-haspopup="true" aria-expanded="false" aria-controls="mFile">File</button>
+      <div class="pop" id="mFile" hidden>
+        <button id="bNew">New map</button>
+        <button id="bOpen">Open…<kbd>Ctrl+O</kbd></button>
+        <button id="bSave">Save<kbd>Ctrl+S</kbd></button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="mb" id="mbIcons" aria-haspopup="true" aria-expanded="false" aria-controls="mIcons">Icons</button>
+      <div class="pop" id="mIcons" hidden>
+        <div id="iFor"></div>
+        <div id="iconGrid"></div>
+        <button id="iClear">Remove all icons</button>
+      </div>
+    </div>
+    <button class="mb" id="bHelp" title="Help (?)">Help</button>
+  </nav>
+  <span class="sep"></span>
+  <div id="toolbar">
   <div class="group">
     <button id="bChild" title="Add child (Tab or Insert)">Child<kbd>Tab</kbd></button>
     <button id="bSib" title="Add sibling (Enter)">Sibling<kbd>↵</kbd></button>
@@ -138,17 +189,10 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <button id="bConnect" title="Connect to another node (C)">Connect<kbd>C</kbd></button>
     <button id="bDel" class="danger" title="Delete branch (Delete)">Delete<kbd>Del</kbd></button>
   </div>
-  <span class="sep"></span>
   <div class="group">
     <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
     <button id="bRedo" title="Redo (Ctrl+Y)">Redo</button>
   </div>
-  <span class="sep"></span>
-  <div class="group">
-    <button id="bOpen" title="Open a .zip or .yaml mind map">Open…</button>
-    <button id="bSave" title="Save the map as a zipped YAML file">Save</button>
-    <button id="bNew">New map</button>
-    <button id="bHelp" title="Help (?)">Help<kbd>?</kbd></button>
   </div>
 </header>
 
@@ -180,6 +224,14 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
   <div class="box" role="dialog" aria-modal="true" aria-labelledby="dlgT">
     <div class="top"><h2 id="dlgT">How to use the editor</h2><button id="hClose">Close</button></div>
     <section>
+      <h3>Menus and toolbar</h3>
+      <dl class="keys">
+        <dt>File</dt><dd>New map, Open and Save.</dd>
+        <dt>Icons</dt><dd>Choose an icon to add it to the selected node, before its title. Choose it again to take it off. <b>Remove all icons</b> clears the node's icons.</dd>
+        <dt>Toolbar</dt><dd>Buttons for the editing commands that also have keys, for use on a phone or tablet.</dd>
+      </dl>
+    </section>
+    <section>
       <h3>Mouse and touch</h3>
       <dl class="keys">
         <dt>Click or tap</dt><dd>Select a node.</dd>
@@ -205,6 +257,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move between siblings.</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move the selected branch up or down among its siblings. The <b>Up</b> and <b>Down</b> buttons do the same.</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo. <kbd>Ctrl</kbd>+<kbd>Y</kbd> redoes.</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Save the map. <kbd>Ctrl</kbd>+<kbd>O</kbd> opens one.</dd>
         <dt><kbd>?</kbd></dt><dd>Open this help.</dd>
       </dl>
     </section>
@@ -228,7 +281,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     </section>
     <section>
       <h3>Saving</h3>
-      <p><b>Save</b> downloads the map as a <code>.zip</code> file holding one YAML file. <b>Open</b> reads one of those, or a plain <code>.yaml</code> file, and replaces the current map; you can also drop a file onto the map. Undo brings back the map you replaced, until you reload the page.</p>
+      <p><b>Save</b> (in the File menu) downloads the map as a <code>.zip</code> file holding one YAML file. <b>Open</b> reads one of those, or a plain <code>.yaml</code> file, and replaces the current map; you can also drop a file onto the map. Undo brings back the map you replaced, until you reload the page.</p>
       <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
       <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
     </section>
@@ -241,8 +294,27 @@ const vp = $('#vp'), stage = $('#stage'), svg = $('#edges');
 const NS = 'http://www.w3.org/2000/svg';
 const HGAP = 34, VGAP = 10, BRANCH_COLORS = 6, STORE = 'mindmap-editor-v1';
 
+// Icons are saved by Freeplane's built-in icon names; the editor draws them as emoji.
+const ICON_GROUPS = [
+  ['Priority', [1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => [`full-${i}`, `${i}️⃣`, `Priority ${i}`])],
+  ['Status', [['yes', '❗', 'Important'], ['idea', '💡', 'Idea'], ['help', '❓', 'Question'], ['messagebox_warning', '⚠️', 'Warning'],
+    ['button_ok', '✅', 'OK'], ['button_cancel', '❌', 'Not OK'], ['stop-sign', '🛑', 'Stop'], ['checked', '☑️', 'Checked'],
+    ['unchecked', '⬜', 'Unchecked'], ['flag', '🚩', 'Flag'], ['bookmark', '🔖', 'Bookmark'], ['info', 'ℹ️', 'Information']]],
+  ['Time', [['calendar', '📅', 'Date'], ['clock', '⏰', 'Time'], ['hourglass', '⏳', 'Waiting'], ['bell', '🔔', 'Reminder']]],
+  ['Things', [['Mail', '✉️', 'Mail'], ['attach', '📎', 'Attachment'], ['pencil', '✏️', 'To edit'], ['list', '📋', 'List'],
+    ['folder', '📁', 'Folder'], ['image', '🖼️', 'Image'], ['video', '🎬', 'Video'], ['audio', '🔊', 'Audio'],
+    ['internet', '🌐', 'Internet'], ['gohome', '🏠', 'Home'], ['password', '🔑', 'Password'], ['encrypted', '🔒', 'Locked'],
+    ['decrypted', '🔓', 'Unlocked'], ['xmag', '🔍', 'To look into'], ['launch', '🚀', 'Launch']]],
+  ['People', [['male1', '👨', 'Man'], ['female1', '👩', 'Woman'], ['group', '👥', 'Group'], ['family', '👪', 'Family']]],
+  ['Smileys', [['ksmiletris', '🙂', 'Happy'], ['smiley-neutral', '😐', 'Neutral'], ['smiley-oh', '😮', 'Surprised'],
+    ['smiley-angry', '😠', 'Angry'], ['smily_bad', '🙁', 'Unhappy']]],
+  ['Arrows', [['up', '⬆️', 'Up'], ['down', '⬇️', 'Down'], ['back', '⬅️', 'Back'], ['forward', '➡️', 'Forward']]],
+];
+const ICONS = new Map(ICON_GROUPS.flatMap(([, list]) => list.map(([name, glyph, label]) => [name, { glyph, label }])));
+
 let uid = 0;
-const mk = (title, note = '', children = []) => ({ id: ++uid, title, note, link: '', connectors: [], children, folded: false, side: null });
+const mk = (title, note = '', children = []) => ({ id: ++uid, title, note, link: '', icons: [], connectors: [], children, folded: false, side: null });
+const iconsOf = n => n.icons || (n.icons = []);
 
 let root, sel, undoStack = [], redoStack = [], parents = new Map(), boxes = new Map();
 let editing = null;
@@ -339,6 +411,12 @@ function render() {
     el.className = 'node' + (n === root ? ' root' : ` d${Math.min(depth, 3)} ${side === 'left' ? 'l' : 'r'}`) + (n === sel ? ' sel' : '');
     el.dataset.id = n.id;
     if (color != null) el.style.setProperty('--c', `var(--b${color})`);
+    for (const name of iconsOf(n)) {
+      const ic = document.createElement('span'), known = ICONS.get(name);
+      ic.className = 'ic'; ic.dataset.icon = name;
+      ic.textContent = known ? known.glyph : '▫'; ic.title = known ? known.label : name;
+      el.append(ic);
+    }
     const t = document.createElement('span'); t.className = 't'; t.textContent = n.title; el.append(t);
     if (n.note && n.note.trim()) {
       el.insertAdjacentHTML('beforeend', '<svg class="ni" width="11" height="13" viewBox="0 0 11 13" aria-label="has note"><path d="M1 .5h6.5L10.5 3.5v9H1z" fill="none" stroke="currentColor"/><path d="M3 6h5M3 8.5h5" stroke="currentColor"/></svg>');
@@ -506,6 +584,10 @@ function showSelection() {
   $('#bUp').disabled = !!c || !sibs.length || sibs[0] === sel;
   $('#bDown').disabled = !!c || !sibs.length || sibs[sibs.length - 1] === sel;
   $('#bUndo').disabled = !undoStack.length; $('#bRedo').disabled = !redoStack.length;
+  const on = iconsOf(sel);
+  $('#iFor').replaceChildren('Icons for ', Object.assign(document.createElement('b'), { textContent: sel.title }));
+  for (const b of $('#iconGrid').querySelectorAll('button')) b.setAttribute('aria-pressed', on.includes(b.dataset.icon));
+  $('#iClear').disabled = !on.length;
 }
 function select(n) {
   if (!n) return;
@@ -590,6 +672,17 @@ function moveBranch(step) {
   [all[i], all[j]] = [all[j], all[i]];
   changed();
 }
+function toggleIcon(name) {
+  if (selConn) select(sel);
+  snapshot();
+  const ic = iconsOf(sel), i = ic.indexOf(name);
+  i < 0 ? ic.push(name) : ic.splice(i, 1);
+  changed();
+}
+function clearIcons() {
+  if (!iconsOf(sel).length) return;
+  snapshot(); sel.icons = []; changed();
+}
 function toggleFold() {
   if (sel === root || !sel.children.length) return;
   snapshot(); sel.folded = !sel.folded; changed();
@@ -668,6 +761,7 @@ function keyPaths() {
 }
 function toObj(n, kp) {
   const o = { title: n.title };
+  if (iconsOf(n).length) o.icons = [...n.icons];
   if (n.note && n.note.trim()) o.note = n.note;
   if (n.link) o.link = n.link;
   const cs = conns(n).filter(c => kp.paths.has(c.to));
@@ -690,8 +784,10 @@ function fromYaml(text) {
     if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(`In this file, ${path} is not a node.`);
     if (typeof o.title !== 'string') throw new Error(`In this file, ${path} has no title.`);
     if (o.link != null && typeof o.link !== 'string') throw new Error(`In this file, the link on ${path} is not text.`);
+    if (o.icons != null && !(Array.isArray(o.icons) && o.icons.every(i => typeof i === 'string')))
+      throw new Error(`In this file, the icons on ${path} are not a list of icon names.`);
     const n = { id: ++next, title: o.title, note: typeof o.note === 'string' ? o.note : '', link: o.link || '',
-                connectors: [], children: [], folded: false, side: null };
+                icons: o.icons ? [...o.icons] : [], connectors: [], children: [], folded: false, side: null };
     byPath.set(path, n);
     if (o.connectors != null) {
       if (!Array.isArray(o.connectors)) throw new Error(`In this file, the connectors on ${path} are not a list.`);
@@ -780,6 +876,46 @@ async function openFile(file) {
 function openHelp() { $('#dlg').hidden = false; $('#hClose').focus(); }
 function closeHelp() { $('#dlg').hidden = true; vp.focus({ preventScroll: true }); }
 
+/* ---------- menus ---------- */
+let openMenu = null;
+function showMenu(pop) {
+  closeMenu();
+  if (editing) finishEdit(true);
+  cancelConnect();
+  pop.hidden = false; pop.style.left = '';
+  $(`[aria-controls="${pop.id}"]`).setAttribute('aria-expanded', 'true');
+  const r = pop.getBoundingClientRect();                     // keep the panel on screen on a phone
+  if (r.right > innerWidth - 8) pop.style.left = (innerWidth - 8 - r.right) + 'px';
+  openMenu = pop;
+  (pop.querySelector('button[aria-pressed="true"], button:not(:disabled)') || pop).focus({ preventScroll: true });
+}
+function closeMenu() {
+  if (!openMenu) return;
+  openMenu.hidden = true;
+  $(`[aria-controls="${openMenu.id}"]`).setAttribute('aria-expanded', 'false');
+  openMenu = null;
+}
+for (const mb of document.querySelectorAll('button.mb[aria-controls]')) {
+  const pop = $('#' + mb.getAttribute('aria-controls'));
+  mb.onclick = () => (openMenu === pop ? closeMenu() : showMenu(pop));
+}
+document.addEventListener('pointerdown', e => { if (openMenu && !e.target.closest('.menu')) closeMenu(); }, true);
+const fileCmd = f => () => { closeMenu(); f(); };
+
+for (const [group, list] of ICON_GROUPS) {
+  const h = document.createElement('h4'); h.textContent = group;
+  const row = document.createElement('div'); row.className = 'row';
+  for (const [name, glyph, label] of list) {
+    const b = document.createElement('button');
+    b.dataset.icon = name; b.textContent = glyph; b.title = label;
+    b.setAttribute('aria-label', label); b.setAttribute('aria-pressed', 'false');
+    row.append(b);
+  }
+  $('#iconGrid').append(h, row);
+}
+$('#iconGrid').addEventListener('click', e => { const b = e.target.closest('button[data-icon]'); if (b) toggleIcon(b.dataset.icon); });
+$('#iClear').onclick = clearIcons;
+
 /* ---------- events ---------- */
 $('#bChild').onclick = addChild;
 $('#bSib').onclick = addSibling;
@@ -792,9 +928,9 @@ $('#connDel').onclick = () => { if (currentConn()) delConn(); };
 $('#bDel').onclick = del;
 $('#bUndo').onclick = undo;
 $('#bRedo').onclick = redo;
-$('#bHelp').onclick = openHelp;
-$('#bSave').onclick = saveMap;
-$('#bOpen').onclick = () => $('#fileIn').click();
+$('#bHelp').onclick = () => { closeMenu(); openHelp(); };
+$('#bSave').onclick = fileCmd(saveMap);
+$('#bOpen').onclick = fileCmd(() => $('#fileIn').click());
 $('#fileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); };
 const mainEl = document.querySelector('main');
 mainEl.addEventListener('dragover', e => { e.preventDefault(); mainEl.classList.add('drop'); });
@@ -803,7 +939,7 @@ mainEl.addEventListener('drop', e => {
   e.preventDefault(); mainEl.classList.remove('drop');
   const f = e.dataTransfer.files[0]; if (f) openFile(f);
 });
-$('#bNew').onclick = () => { snapshot(); uid = 0; root = mk('New mind map'); sel = root; selConn = null; cancelConnect(); boxes = new Map(); changed(); };
+$('#bNew').onclick = () => { closeMenu(); snapshot(); uid = 0; root = mk('New mind map'); sel = root; selConn = null; cancelConnect(); boxes = new Map(); changed(); };
 $('#hClose').onclick = closeHelp;
 $('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeHelp(); });
 $('#dlg').addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
@@ -858,12 +994,18 @@ let lastTap = { id: 0, t: 0 };
 vp.tabIndex = 0;
 document.addEventListener('keydown', e => {
   if (editing || !$('#dlg').hidden) return;
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); closeMenu(); saveMap(); return; }
+  if (ctrl && !e.altKey && e.key.toLowerCase() === 'o') { e.preventDefault(); closeMenu(); $('#fileIn').click(); return; }
+  if (openMenu) {
+    if (e.key === 'Escape') { closeMenu(); vp.focus({ preventScroll: true }); }
+    return;                                   // other keys act on the open menu's buttons
+  }
   const a = document.activeElement;
   if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) {
     if (e.key === 'Escape') { a.blur(); vp.focus({ preventScroll: true }); }
     return;
   }
-  const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (ctrl && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
   if (ctrl && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {

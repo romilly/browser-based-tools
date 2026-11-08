@@ -111,6 +111,7 @@ async def run_script(demo):
     await demo.caption('Mind Map Editor: a Freeplane-style mind map in your browser', 2.5)
 
     await demo.caption('Start a new map')
+    await demo.click('#mbFile')
     await demo.click('#bNew')
 
     await demo.caption('Double-click the central topic to name it')
@@ -160,6 +161,7 @@ async def run_script(demo):
 
     await demo.caption('Save the map as a zipped YAML file')
     async with page.expect_download():
+        await demo.click('#mbFile')
         await demo.click('#bSave')
     await demo.pause(2.5)
     await demo.caption('', 0.8)

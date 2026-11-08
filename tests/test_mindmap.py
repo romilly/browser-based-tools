@@ -34,12 +34,28 @@ class MindMap:
     def message(self):
         return self.page.text_content('#toast')
 
+    def menu(self, name, item=None):
+        """Open a menu on the menu bar (File, Icons) and optionally choose one of its items."""
+        self.page.click(f'#menubar button.mb:text-is("{name}")')
+        if item:
+            self.page.click(item)
+
     def save(self, folder):
         with self.page.expect_download() as d:
-            self.page.click('#bSave')
+            self.menu('File', '#bSave')
         path = Path(folder) / d.value.suggested_filename
         d.value.save_as(path)
         return path
+
+    def icons_of(self, title):
+        return self.node(title).locator('.ic').evaluate_all('es => es.map(e => e.dataset.icon)')
+
+    def toggle_icons(self, title, *names):
+        self.node(title).click()
+        self.menu('Icons')
+        for n in names:
+            self.page.click(f'#mIcons [data-icon="{n}"]')
+        self.page.keyboard.press('Escape')
 
     def open(self, path):
         before = self.message()
@@ -47,7 +63,7 @@ class MindMap:
         self.page.wait_for_function('t => document.querySelector("#toast").innerText !== t', arg=before)
 
     def new_map(self):
-        self.page.click('#bNew')
+        self.menu('File', '#bNew')
 
     def add_link(self, title, url):
         self.node(title).click()
@@ -314,6 +330,94 @@ def test_undo_puts_a_moved_branch_back(mm):
     mm.page.keyboard.press('Control+ArrowUp')
     mm.page.click('#bUndo')
     assert crud_kids(mm) == CRUD_KIDS
+
+
+# ---------- menus and toolbar ----------
+
+ACCELERATED = ['Child', 'Sibling', 'Edit', 'Fold', 'Up', 'Down', 'Connect', 'Delete', 'Undo', 'Redo']
+
+
+def test_the_toolbar_only_has_commands_with_keys(mm):
+    labels = mm.page.locator('#toolbar button').evaluate_all('bs => bs.map(b => b.firstChild.textContent.trim())')
+    assert labels == ACCELERATED
+    assert mm.page.locator('#toolbar button:not([title*="("])').count() == 0   # every tooltip names its key
+
+
+def test_file_commands_are_in_the_file_menu(mm):
+    assert not mm.page.is_visible('#bSave')
+    mm.menu('File')
+    assert mm.page.is_visible('#bNew') and mm.page.is_visible('#bOpen') and mm.page.is_visible('#bSave')
+    mm.page.keyboard.press('Escape')
+    assert not mm.page.is_visible('#mFile')
+
+
+def test_clicking_the_map_closes_a_menu(mm):
+    mm.menu('File')
+    mm.node('SQLite browser').click()
+    assert not mm.page.is_visible('#mFile')
+    assert 'sel' in mm.node('SQLite browser').get_attribute('class')
+
+
+def test_ctrl_s_saves(mm, tmp_path):
+    with mm.page.expect_download() as d:
+        mm.page.keyboard.press('Control+s')
+    assert d.value.suggested_filename == 'toolbox.zip'
+
+
+# ---------- icons ----------
+
+def test_an_icon_from_the_icons_menu_is_shown_before_the_title(mm):
+    mm.toggle_icons('Foreign keys', 'idea')
+    assert mm.icons_of('Foreign keys') == ['idea']
+    first = mm.node('Foreign keys').evaluate('e => e.firstElementChild.className')
+    assert first == 'ic'
+
+
+def test_choosing_an_icon_again_removes_it(mm):
+    mm.toggle_icons('Foreign keys', 'full-1', 'idea')
+    mm.menu('Icons')
+    assert mm.page.get_attribute('#mIcons [data-icon="idea"]', 'aria-pressed') == 'true'
+    assert mm.page.get_attribute('#mIcons [data-icon="yes"]', 'aria-pressed') == 'false'
+    mm.page.click('#mIcons [data-icon="full-1"]')
+    assert mm.icons_of('Foreign keys') == ['idea']
+
+
+def test_remove_all_icons_and_undo(mm):
+    mm.toggle_icons('Foreign keys', 'full-1', 'idea')
+    mm.menu('Icons', '#iClear')
+    assert mm.icons_of('Foreign keys') == []
+    mm.page.keyboard.press('Escape')
+    mm.page.click('#bUndo')
+    assert mm.icons_of('Foreign keys') == ['full-1', 'idea']
+
+
+def test_icons_are_saved_and_opened(mm, tmp_path):
+    mm.toggle_icons('Foreign keys', 'full-1', 'button_ok')
+    (tmp_path / 'a').mkdir()
+    (tmp_path / 'b').mkdir()
+    first = mm.save(tmp_path / 'a')
+    _, data = read_zip(first)
+    jsonschema.validate(data, SCHEMA)
+    assert data['root']['children']['crudulator']['children']['foreign_keys']['icons'] == ['full-1', 'button_ok']
+    assert 'icons' not in data['root']['children']['crudulator']
+    mm.new_map()
+    mm.open(first)
+    assert mm.icons_of('Foreign keys') == ['full-1', 'button_ok']
+    assert read_zip(mm.save(tmp_path / 'b')) == read_zip(first)
+
+
+def test_an_unknown_icon_name_is_kept(mm, tmp_path, ):
+    mm.open(write_zip(tmp_path / 'u.zip', 'root:\n  title: U\n  children:\n    a: {title: A, icons: [idea, korn]}\n'))
+    assert mm.icons_of('A') == ['idea', 'korn']
+    _, data = read_zip(mm.save(tmp_path))
+    assert data['root']['children']['a']['icons'] == ['idea', 'korn']
+
+
+def test_icons_that_are_not_a_list_are_reported(mm, tmp_path):
+    before = mm.titles()
+    mm.open(write_zip(tmp_path / 'bad.zip', 'root:\n  title: B\n  icons: idea\n  children:\n    a: {title: A}\n'))
+    assert 'icons' in mm.message()
+    assert mm.titles() == before
 
 
 def test_a_connector_to_a_missing_node_is_reported(mm, tmp_path):

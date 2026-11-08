@@ -44,12 +44,13 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 - **Notes:** select a branch and type in the Note panel. Branches with a note show a small page icon, and hovering shows the note.
 - **Web links:** type an address in the Link box to attach it to a branch (`https://` is added if you leave it out). The branch shows a link icon that opens the page in a new tab.
 - **Connectors:** a dashed arrow from any branch to any other, with an optional label, like Freeplane's connectors. Select the first branch, choose **Connect** (or press C), then click the second. Click a connector to change its label or delete it.
+- **Icons:** the **Icons** menu lists icons (priorities 1–9, idea, important, question, OK, flags, dates and more). Choose one to add it to the selected branch, before its title; choose it again to take it off, or use **Remove all icons**. Icons are saved by Freeplane's built-in icon names, such as `idea` and `full-1`.
 - **Fold branches:** Space folds or unfolds a branch. A folded branch shows a circle with the number of hidden nodes; click it to unfold.
 - **Reorder branches:** Ctrl+↑ and Ctrl+↓ (or the **Up** and **Down** buttons) move the selected branch up or down among its siblings. A main branch stays on its own side of the centre.
 - **Move around:** the arrow keys move between branches, and you can drag the empty space (or swipe) to scroll the map.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the toolbar buttons.
-- **Help:** the Help button, or `?`, lists every action.
-- **Open and Save:** **Save** downloads the map as a `.zip` file holding one YAML file in the format described by [`mindmap-schema.json`](mindmap-schema.json). **Open** reads one of those, or a plain `.yaml` file, and replaces the current map (Undo brings the old one back). You can also drop a file onto the map. YAML doesn't record which side of the centre a branch is on, so an opened map shares its branches between left and right.
+- **Menus and toolbar:** the File menu has New map, Open (Ctrl+O) and Save (Ctrl+S); Help, or `?`, lists every action. The toolbar only has the editing commands that also have keys, so you can use them on a phone or tablet.
+- **Open and Save:** **Save** (File menu or Ctrl+S) downloads the map as a `.zip` file holding one YAML file in the format described by [`mindmap-schema.json`](mindmap-schema.json). **Open** reads one of those, or a plain `.yaml` file, and replaces the current map (Undo brings the old one back). You can also drop a file onto the map. YAML doesn't record which side of the centre a branch is on, so an opened map shares its branches between left and right.
 - **Remembered between visits:** the current map is also kept in the browser (localStorage), but not across browsers or devices, so use **Save** to keep a copy.
 
 ---
