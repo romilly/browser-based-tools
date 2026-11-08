@@ -433,3 +433,77 @@ root:
 """))
     assert 'not in the map' in mm.message()
     assert mm.titles() == before
+
+
+# Notes are Markdown: typed as text, shown formatted when you're not editing them.
+
+def note_view(mm):
+    return mm.page.locator('#noteView')
+
+
+def write_note(mm, title, text):
+    mm.node(title).click()
+    if note_view(mm).is_visible():
+        note_view(mm).click()
+    mm.page.fill('#note', text)
+    mm.page.press('#note', 'Escape')
+
+
+def test_a_note_is_shown_formatted_after_editing(mm):
+    write_note(mm, 'CRUDulator', '**Book** early\n\n- ferry\n- train')
+    view = note_view(mm)
+    assert view.is_visible()
+    assert not mm.page.locator('#note').is_visible()
+    assert view.locator('strong').inner_text() == 'Book'
+    assert view.locator('li').all_inner_texts() == ['ferry', 'train']
+
+
+def test_clicking_a_formatted_note_edits_the_markdown(mm):
+    write_note(mm, 'CRUDulator', '*soon*')
+    note_view(mm).click()
+    assert mm.page.locator('#note').is_visible()
+    assert mm.page.evaluate('document.activeElement.id') == 'note'
+    assert mm.page.input_value('#note') == '*soon*'
+
+
+def test_a_node_without_a_note_shows_the_empty_note_box(mm):
+    write_note(mm, 'CRUDulator', '')
+    assert mm.page.locator('#note').is_visible()
+    assert not note_view(mm).is_visible()
+
+
+def test_links_in_a_note_open_in_a_new_tab(mm):
+    write_note(mm, 'CRUDulator', 'See [the ferry](https://www.stenaline.co.uk)')
+    a = note_view(mm).locator('a')
+    assert a.get_attribute('href') == 'https://www.stenaline.co.uk'
+    assert a.get_attribute('target') == '_blank'
+    assert 'noopener' in a.get_attribute('rel')
+
+
+def test_html_in_an_opened_note_cannot_run(mm, tmp_path):
+    mm.open(write_zip(tmp_path / 'evil.zip', """
+root:
+  title: Evil
+  children:
+    a:
+      title: A
+      note: |
+        Hello <img src="x" onerror="window.pwned = 1"><script>window.pwned = 2</script>
+        [click](javascript:window.pwned=3)
+"""))
+    mm.node('A').click()
+    view = note_view(mm)
+    assert 'Hello' in view.inner_text()
+    for link in view.locator('a').all():
+        link.click()
+    mm.page.wait_for_timeout(200)
+    assert mm.page.evaluate('window.pwned') is None
+    assert view.locator('script, [onerror]').count() == 0
+
+
+def test_markdown_notes_are_saved_unchanged(mm, tmp_path):
+    text = '# Plan\n\n1. **Book** the ferry\n2. Pack `bikes`\n'
+    write_note(mm, 'CRUDulator', text)
+    _, data = read_zip(mm.save(tmp_path))
+    jsonschema.validate(data, SCHEMA)
+    assert data['root']['children']['crudulator']['note'] == text

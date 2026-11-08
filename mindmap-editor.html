@@ -7,6 +7,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.17/purify.min.js"></script>
 <style>
 /* Layout: toolbar band on top; scrolling map canvas fills the rest; note panel on the right (below the map on phones) */
 :root{
@@ -123,6 +125,22 @@ aside input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #connDel{align-self:flex-start}
 #note{flex:1;min-height:120px;resize:none;font:14px/1.5 var(--ui);color:var(--fg);background:var(--canvas);
   border:1px solid var(--line);border-radius:5px;padding:8px}
+/* A note shown formatted from its Markdown; click it to edit */
+#noteView{flex:1;min-height:120px;overflow:auto;font:14px/1.5 var(--ui);color:var(--fg);background:var(--canvas);
+  border:1px solid var(--line);border-radius:5px;padding:8px;cursor:text;overflow-wrap:anywhere}
+#noteView:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#noteView>:first-child{margin-top:0} #noteView>:last-child{margin-bottom:0}
+#noteView p,#noteView ul,#noteView ol,#noteView pre,#noteView blockquote{margin:0 0 .6em}
+#noteView ul,#noteView ol{padding-left:1.4em}
+#noteView h1,#noteView h2,#noteView h3,#noteView h4{font-size:15px;margin:.8em 0 .4em;line-height:1.3}
+#noteView h1{font-size:17px}
+#noteView a{color:var(--accent)}
+#noteView code{font:12.5px var(--mono);background:var(--panel);border-radius:3px;padding:0 3px}
+#noteView pre{background:var(--panel);border-radius:4px;padding:6px 8px;overflow:auto}
+#noteView pre code{padding:0;background:none}
+#noteView blockquote{border-left:3px solid var(--line);padding-left:8px;color:var(--muted)}
+#noteView img{max-width:100%}
+#noteView table{border-collapse:collapse} #noteView th,#noteView td{border:1px solid var(--line);padding:2px 6px}
 #dlg{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);display:grid;place-items:center;z-index:20;
   padding:16px}
 #dlg .box{background:var(--canvas);border:1px solid var(--line);border-radius:8px;width:min(640px,100%);max-height:100%;
@@ -208,7 +226,8 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <label for="link">Link</label>
       <input id="link" type="url" inputmode="url" placeholder="https://example.org" autocomplete="off" spellcheck="false">
       <label for="note">Note</label>
-      <textarea id="note" placeholder="No note yet. Type here to add one."></textarea>
+      <textarea id="note" placeholder="No note yet. Type here to add one. Markdown works: **bold**, *italic*, - lists, [links](https://example.org)."></textarea>
+      <div id="noteView" tabindex="0" role="button" aria-label="Note; click to edit" hidden></div>
     </div>
     <div class="pane" id="connPanel" hidden>
       <label>Connector</label>
@@ -278,6 +297,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <section>
       <h3>Notes</h3>
       <p>Select a node and type in the Note panel. Nodes with a note show a small page icon. Press <kbd>Esc</kbd> to leave the note and go back to the map.</p>
+      <p>Notes use Markdown: <code>**bold**</code>, <code>*italic*</code>, <code>- </code> or <code>1. </code> for lists, <code>#</code> for a heading, <code>`code`</code> and <code>[text](https://…)</code> for a link. When you leave the note it is shown formatted; click or tap it to edit it again. Links in a note open in a new tab.</p>
     </section>
     <section>
       <h3>Saving</h3>
@@ -575,7 +595,7 @@ function showSelection() {
     if (el) { el.classList.add('sel'); el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
   }
   $('#noteFor').textContent = sel.title;
-  const ta = $('#note'); if (document.activeElement !== ta) ta.value = sel.note || '';
+  showNote();
   const li = $('#link'); if (document.activeElement !== li) li.value = sel.link || '';
   $('#bDel').disabled = !c && sel === root;
   $('#bConnect').disabled = !!c;
@@ -944,9 +964,30 @@ $('#hClose').onclick = closeHelp;
 $('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeHelp(); });
 $('#dlg').addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
 
+// Notes are Markdown. Out of editing, a note is shown formatted (and sanitised, since opened files can hold any HTML).
+// Without the marked and DOMPurify libraries, the plain text box is always shown.
+const noteView = $('#noteView');
+const canFormat = () => !!(window.marked && window.DOMPurify);
+function showNote() {
+  const ta = $('#note');
+  if (document.activeElement === ta) return;
+  ta.value = sel.note || '';
+  const formatted = canFormat() && !!ta.value.trim();
+  if (formatted) {
+    const html = DOMPurify.sanitize(marked.parse(ta.value), { RETURN_DOM_FRAGMENT: true });
+    for (const a of html.querySelectorAll('a')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+    noteView.replaceChildren(html);
+  }
+  noteView.hidden = !formatted; ta.hidden = formatted;
+}
+function editNote() { noteView.hidden = true; ta.hidden = false; ta.focus(); }
+noteView.addEventListener('click', e => { if (!e.target.closest('a')) editNote(); });
+noteView.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); editNote(); } });
+
 let noteSnap = false;
 const ta = $('#note');
 ta.addEventListener('focus', () => { noteSnap = false; });
+ta.addEventListener('blur', showNote);
 ta.addEventListener('input', () => {
   if (!noteSnap) { snapshot(); noteSnap = true; }
   const had = !!(sel.note && sel.note.trim());

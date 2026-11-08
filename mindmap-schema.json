@@ -22,7 +22,7 @@
         },
         "note": {
           "type": "string",
-          "description": "Rich text note attached to the node"
+          "description": "A note attached to the node, in Markdown"
         },
         "link": {
           "type": "string",

@@ -41,7 +41,7 @@ Each record list and form shows one table at a time, with links to other tables 
 Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a central topic with branches curving out to the left and right. Every branch has a title and an optional note.
 
 - **Add, edit and delete branches:** Tab adds a child, Enter adds a sibling, F2 or a double-click (double-tap on a tablet) edits a title, and Delete removes a branch with everything below it. The toolbar buttons do the same on touch screens.
-- **Notes:** select a branch and type in the Note panel. Branches with a note show a small page icon, and hovering shows the note.
+- **Notes:** select a branch and type in the Note panel. Notes are Markdown (**bold**, *italic*, lists, headings, links), shown formatted when you leave the note; click or tap it to edit. Branches with a note show a small page icon, and hovering shows the note.
 - **Web links:** type an address in the Link box to attach it to a branch (`https://` is added if you leave it out). The branch shows a link icon that opens the page in a new tab.
 - **Connectors:** a dashed arrow from any branch to any other, with an optional label, like Freeplane's connectors. Select the first branch, choose **Connect** (or press C), then click the second. Click a connector to change its label or delete it.
 - **Icons:** the **Icons** menu lists icons (priorities 1–9, idea, important, question, OK, flags, dates and more). Choose one to add it to the selected branch, before its title; choose it again to take it off, or use **Remove all icons**. Icons are saved by Freeplane's built-in icon names, such as `idea` and `full-1`.
@@ -55,7 +55,7 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 
 ---
 
-The SQLite Browser and CRUDulator need an internet connection on first load, to fetch sql.js and JSZip from cdnjs. The Mind Map Editor fetches js-yaml and JSZip from cdnjs for Open and Save; editing works without them.
+The SQLite Browser and CRUDulator need an internet connection on first load, to fetch sql.js and JSZip from cdnjs. The Mind Map Editor fetches js-yaml and JSZip from cdnjs for Open and Save, and marked and DOMPurify to show notes formatted; editing works without them, with notes shown as plain text.
 
 ## Running the tests
 
@@ -78,7 +78,7 @@ pytest --headed           # watch the browser while the tests run
 pytest -k link            # run only tests with "link" in their name
 ```
 
-The tests serve the repository from a local web server, so no setup is needed beyond the above. The pages fetch sql.js and JSZip from cdnjs; to run offline, put `sql-asm.js` and `jszip.min.js` in a folder and set `CRUD_LOCAL_LIBS` to its path (add `js-yaml.min.js` for the Mind Map Editor tests).
+The tests serve the repository from a local web server, so no setup is needed beyond the above. The pages fetch sql.js and JSZip from cdnjs; to run offline, put `sql-asm.js` and `jszip.min.js` in a folder and set `CRUD_LOCAL_LIBS` to its path (add `js-yaml.min.js`, `marked.min.js` and `purify.min.js` for the Mind Map Editor tests).
 
 ## Recording the demo video
 
