@@ -23,6 +23,7 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 - **Fold, reorder and move around:** Space folds a branch; Ctrl+↑ and Ctrl+↓ move it among its siblings; the arrow keys move between branches; drag or swipe the empty space to scroll.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the toolbar buttons.
 - **Open and Save:** **Save** downloads the map as a `.zip` file holding a YAML file and any images. **Open** reads one of those, or a plain `.yaml` file.
+- **Export as Markdown:** downloads the map as a `.zip` of linked Markdown pages, one per branch in folders shaped like the map, with its images. Notes and maths are copied as they are, so the pages read well on GitHub or in Obsidian.
 
 ## Your data
 

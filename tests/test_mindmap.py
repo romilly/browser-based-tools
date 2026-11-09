@@ -907,3 +907,157 @@ def test_the_map_and_panel_fit_a_phone_turned_to_landscape(mm):
     root = mm.page.locator('.node.root').bounding_box()
     vp = mm.page.locator('#vp').bounding_box()
     assert vp['y'] <= root['y'] and root['y'] + root['height'] <= vp['y'] + vp['height']   # the root is still in view
+
+
+# Exporting as linked Markdown files
+
+TRIP = '''
+root:
+  title: Holiday
+  note: |
+    A week in **June**.
+  children:
+    travel:
+      title: Travel
+      icons: [full-1, idea]
+      link: https://www.stenaline.co.uk
+      note: |
+        Book the **night ferry**.
+
+        $$C = n \\times (h + f)$$
+      connectors:
+        - to: root/places/utrecht
+          label: then by train
+        - to: root
+      children:
+        ferry:
+          title: Ferry
+          image: images/ferry.png
+        trains:
+          title: Trains
+    places:
+      title: Places
+      children:
+        utrecht:
+          title: Utrecht
+'''
+
+
+def export_markdown(mm, folder):
+    with mm.page.expect_download() as d:
+        mm.menu('File', '#bExportMd')
+    path = Path(folder) / d.value.suggested_filename
+    d.value.save_as(path)
+    return path
+
+
+def markdown_files(path):
+    """The exported zip's files (not folders), text for Markdown and bytes for the rest."""
+    with zipfile.ZipFile(path) as z:
+        return {n: (z.read(n).decode('utf-8') if n.endswith('.md') else z.read(n))
+                for n in z.namelist() if not n.endswith('/')}
+
+
+def open_trip(mm, tmp_path, image=True):
+    path = tmp_path / 'trip.zip'
+    with zipfile.ZipFile(path, 'w') as z:
+        z.writestr('trip.yaml', TRIP)
+        if image:
+            z.write(make_image(tmp_path / 'ferry.png', (60, 40)), 'images/ferry.png')
+    mm.open(path)
+    assert 'Opened' in mm.message()
+
+
+def test_export_gives_a_zip_with_one_markdown_file_per_node_in_folders_like_the_tree(mm, tmp_path):
+    path = export_markdown(mm, tmp_path)
+    assert path.name == 'toolbox_markdown.zip'
+    files = markdown_files(path)
+    assert len(files) == mm.page.evaluate('allNodes().length')
+    assert all(name.startswith('toolbox/') and name.endswith('/index.md') or name == 'toolbox/index.md' for name in files)
+    assert 'toolbox/crudulator/index.md' in files
+    assert files['toolbox/index.md'].startswith('# Toolbox\n')
+    assert '\nBrowser-based tools' in files['toolbox/index.md']
+    assert 'Exported toolbox_markdown.zip' in mm.message()
+
+
+def test_each_file_has_the_node_and_links_to_its_children_connectors_and_parent(mm, tmp_path):
+    open_trip(mm, tmp_path)
+    files = markdown_files(export_markdown(mm, tmp_path))
+    assert files['holiday/travel/index.md'] == '''# 1️⃣ 💡 Travel
+
+🔗 <https://www.stenaline.co.uk>
+
+Book the **night ferry**.
+
+$$C = n \\times (h + f)$$
+
+## Contents
+
+- [Ferry](ferry/index.md)
+- [Trains](trains/index.md)
+
+## See also
+
+- [Utrecht](../places/utrecht/index.md): then by train
+- [Holiday](../index.md)
+
+---
+
+Up: [Holiday](../index.md)
+'''
+    assert files['holiday/index.md'] == '''# Holiday
+
+A week in **June**.
+
+## Contents
+
+- [Travel](travel/index.md)
+- [Places](places/index.md)
+'''
+
+
+def test_images_go_in_the_zip_and_are_shown_from_their_node(mm, tmp_path):
+    open_trip(mm, tmp_path)
+    files = markdown_files(export_markdown(mm, tmp_path))
+    assert files['holiday/images/ferry.png'] == (tmp_path / 'ferry.png').read_bytes()
+    assert files['holiday/travel/ferry/index.md'].startswith('# Ferry\n\n![Ferry](../../images/ferry.png)\n')
+
+
+def test_every_relative_link_in_the_export_names_a_file_in_it(mm, tmp_path):
+    import posixpath
+    import re
+    open_trip(mm, tmp_path)
+    files = markdown_files(export_markdown(mm, tmp_path))
+    targets = 0
+    for name, text in files.items():
+        if not name.endswith('.md'):
+            continue
+        for target in re.findall(r'\]\(([^)]+)\)', text):
+            targets += 1
+            assert posixpath.normpath(posixpath.join(posixpath.dirname(name), target)) in files, (name, target)
+    assert targets == 13
+
+
+def test_a_missing_image_is_left_out_and_reported(mm, tmp_path):
+    open_trip(mm, tmp_path, image=False)
+    files = markdown_files(export_markdown(mm, tmp_path))
+    assert files['holiday/travel/ferry/index.md'] == '# Ferry\n\n---\n\nUp: [Travel](../index.md)\n'
+    assert not any(name.endswith('.png') for name in files)
+    assert '1 image missing' in mm.message()
+
+
+def test_titles_are_kept_as_plain_text(mm, tmp_path):
+    mm.new_map()
+    mm.page.dblclick('.node.root .t')
+    mm.page.keyboard.press('Control+a')
+    mm.page.keyboard.type('*Rob\'s* [list] costs $5 and $10')
+    mm.page.keyboard.press('Enter')
+    files = markdown_files(export_markdown(mm, tmp_path))
+    assert list(files) == ['rob_s_list_costs_5_and_10/index.md']
+    assert files['rob_s_list_costs_5_and_10/index.md'] == "# \\*Rob's\\* \\[list\\] costs \\$5 and \\$10\n"
+
+
+def test_help_explains_markdown_export(mm):
+    mm.page.click('#bHelp')
+    section = mm.page.locator('#dlg section', has=mm.page.locator('h3', has_text='Saving'))
+    assert 'Export as Markdown' in section.inner_text()

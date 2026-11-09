@@ -195,6 +195,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <button id="bNew">New map</button>
         <button id="bOpen">Open…<kbd>Ctrl+O</kbd></button>
         <button id="bSave">Save<kbd>Ctrl+S</kbd></button>
+        <button id="bExportMd">Export as Markdown</button>
       </div>
     </div>
     <div class="menu">
@@ -347,6 +348,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <section>
       <h3>Saving</h3>
       <p><b>Save</b> (in the File menu) downloads the map as a <code>.zip</code> file holding one YAML file. <b>Open</b> reads one of those, or a plain <code>.yaml</code> file, and replaces the current map; you can also drop a file onto the map. Undo brings back the map you replaced, until you reload the page.</p>
+      <p><b>Export as Markdown</b> (also in the File menu) downloads the map as a <code>.zip</code> file of linked Markdown pages, one per branch, in folders arranged like the map, with the images. Each page has the branch's icons, title, picture, web link and note, then links to the branches under it, to its connectors' targets and back up to its parent. Notes and maths are copied as they are, so they show on GitHub or in Obsidian. The editor can't open an export again: use Save for that.</p>
       <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
       <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
     </section>
@@ -932,6 +934,45 @@ async function saveMap() {
   if (await saveFile(name + '.zip', blob))
     toast(`Saved ${name}.zip.` + (missing ? ` ${plural(missing, 'image')} missing from the map ${missing === 1 ? 'was' : 'were'} not included.` : ''));
 }
+/* ---------- export as linked Markdown ---------- */
+// Titles and labels are plain text, so characters Markdown (or maths) would act on are escaped.
+const mdText = t => t.replace(/\s*\n\s*/g, ' ').replace(/[\\`*_{}\[\]<>#|~$]/g, '\\$&');
+const mdUrl = p => p.split('/').map(encodeURIComponent).join('/');
+// One page per node, at <key>/<key>/.../index.md; folders mirror the tree.
+const pageOf = (kp, id) => kp.paths.get(id).split('/').slice(1).map(k => k + '/').join('') + 'index.md';
+function nodeMarkdown(n, kp, hasImage) {
+  const top = '../'.repeat(kp.paths.get(n.id).split('/').length - 1);
+  const glyphs = iconsOf(n).map(i => ICONS.get(i)?.glyph).filter(Boolean);
+  const parts = ['# ' + [...glyphs, mdText(n.title)].join(' ')];
+  if (n.image && hasImage(n.image)) parts.push(`![${mdText(n.title)}](${top}${mdUrl(n.image)})`);
+  if (n.link) parts.push(`🔗 <${n.link.replace(/ /g, '%20')}>`);
+  const note = (n.note || '').replace(/^(\s*\n)+/, '').trimEnd();
+  if (note) parts.push(note);
+  if (n.children.length)
+    parts.push('## Contents', ordered(n).map(c => `- [${mdText(c.title)}](${kp.keys.get(c.id)}/index.md)`).join('\n'));
+  const cs = conns(n).filter(c => kp.paths.has(c.to) && c.to !== n.id);
+  if (cs.length)
+    parts.push('## See also', cs.map(c => `- [${mdText(findById(root, c.to).title)}](${top}${pageOf(kp, c.to)})`
+                                            + (c.label ? ': ' + mdText(c.label) : '')).join('\n'));
+  const up = parents.get(n.id);
+  if (up) parts.push('---', `Up: [${mdText(up.title)}](../index.md)`);
+  return parts.join('\n\n') + '\n';
+}
+async function exportMarkdown() {
+  if (!libsReady()) return;
+  if (editing) finishEdit(true);
+  indexParents();
+  const name = slug(root.title) || 'mindmap', kp = keyPaths(), zip = new JSZip(), nodes = [];
+  (function walk(n) { nodes.push(n); ordered(n).forEach(walk); })(root);
+  for (const n of nodes) zip.file(`${name}/${pageOf(kp, n.id)}`, nodeMarkdown(n, kp, p => imgs.has(p)));
+  const paths = new Set(nodes.map(n => n.image).filter(Boolean));
+  let missing = 0;
+  for (const p of paths) imgs.has(p) ? zip.file(`${name}/${p}`, imgs.get(p).blob, { compression: 'STORE' }) : missing++;
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  if (await saveFile(name + '_markdown.zip', blob))
+    toast(`Exported ${name}_markdown.zip: ${plural(nodes.length, 'page')}` + (paths.size - missing ? `, ${plural(paths.size - missing, 'image')}` : '') + '.'
+          + (missing ? ` ${plural(missing, 'image')} missing from the map ${missing === 1 ? 'was' : 'were'} left out.` : ''));
+}
 async function openFile(file) {
   if (!libsReady()) return;
   try {
@@ -1130,6 +1171,7 @@ $('#bUndo').onclick = undo;
 $('#bRedo').onclick = redo;
 $('#bHelp').onclick = () => { closeMenu(); openHelp(); };
 $('#bSave').onclick = fileCmd(saveMap);
+$('#bExportMd').onclick = fileCmd(exportMarkdown);
 $('#bOpen').onclick = fileCmd(() => $('#fileIn').click());
 $('#fileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); };
 $('#bAttach').onclick = fileCmd(() => { if (selConn) select(sel); $('#imageIn').click(); });
