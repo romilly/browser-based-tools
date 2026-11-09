@@ -2,7 +2,7 @@
 
 This document describes the file format used by the Mind Map Editor (`mindmap-editor.html`). It is written so that a person or an AI agent can produce a file that the editor opens correctly, without having to read the editor's code.
 
-The machine-readable definition is [`mindmap-schema.json`](mindmap-schema.json) (JSON Schema, draft 7). This document adds the rules the schema can't express, and explains the YAML pitfalls that most often produce broken files.
+The machine-readable definition is [`mindmap-schema.json`](../../mindmap-schema.json) (JSON Schema, draft 7). This document adds the rules the schema can't express, and explains the YAML pitfalls that most often produce broken files.
 
 ## In brief
 

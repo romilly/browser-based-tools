@@ -630,9 +630,9 @@ def test_the_schema_examples_are_valid_and_open_unchanged(mm, tmp_path):
         assert saved == example
 
 
-# mindmap-format.md: its examples and its checker must match what the editor does.
+# mindmap-editor/reference/file-format.md: its examples and its checker must match what the editor does.
 
-FORMAT_DOC = (ROOT / 'mindmap-format.md').read_text()
+FORMAT_DOC = (ROOT / 'mindmap-editor' / 'reference' / 'file-format.md').read_text()
 
 
 def doc_blocks(language):

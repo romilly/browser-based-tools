@@ -1,0 +1,8 @@
+title: Browser-based tools
+description: Small productivity tools that run entirely in your web browser.
+theme: jekyll-theme-primer
+exclude:
+  - tests
+  - demos
+  - requirements-dev.txt
+  - pytest.ini
