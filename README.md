@@ -50,7 +50,7 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 - **Move around:** the arrow keys move between branches, and you can drag the empty space (or swipe) to scroll the map.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the toolbar buttons.
 - **Menus and toolbar:** the File menu has New map, Open (Ctrl+O) and Save (Ctrl+S); Help, or `?`, lists every action. The toolbar only has the editing commands that also have keys, so you can use them on a phone or tablet.
-- **Open and Save:** **Save** (File menu or Ctrl+S) downloads the map as a `.zip` file holding one YAML file in the format described by [`mindmap-schema.json`](mindmap-schema.json). **Open** reads one of those, or a plain `.yaml` file, and replaces the current map (Undo brings the old one back). You can also drop a file onto the map. YAML doesn't record which side of the centre a branch is on, so an opened map shares its branches between left and right.
+- **Open and Save:** **Save** (File menu or Ctrl+S) downloads the map as a `.zip` file holding one YAML file in the format described by [`mindmap-schema.json`](mindmap-schema.json). [`mindmap-format.md`](mindmap-format.md) explains the format in full, for people and AI agents writing map files, with a checker you can paste into Jupyter. **Open** reads one of those, or a plain `.yaml` file, and replaces the current map (Undo brings the old one back). You can also drop a file onto the map. YAML doesn't record which side of the centre a branch is on, so an opened map shares its branches between left and right.
 - **Remembered between visits:** the current map is also kept in the browser (localStorage), but not across browsers or devices, so use **Save** to keep a copy.
 
 ---

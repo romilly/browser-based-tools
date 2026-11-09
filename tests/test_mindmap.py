@@ -609,3 +609,85 @@ def test_help_has_a_latex_guide_with_a_link_to_more(mm):
     link = section.locator('a')
     assert link.get_attribute('href') == 'https://www.overleaf.com/learn/latex/Mathematical_expressions'
     assert link.get_attribute('target') == '_blank'
+
+
+# The schema matches what the editor writes.
+
+def test_a_new_map_with_only_a_root_is_saved_in_the_schema_format(mm, tmp_path):
+    mm.new_map()
+    _, data = read_zip(mm.save(tmp_path))
+    assert data == {'root': {'title': 'New mind map'}}
+    jsonschema.validate(data, SCHEMA)
+
+
+def test_the_schema_examples_are_valid_and_open_unchanged(mm, tmp_path):
+    for i, example in enumerate(SCHEMA['examples']):
+        jsonschema.validate(example, SCHEMA)
+        path = write_zip(tmp_path / f'ex{i}.zip', yaml.safe_dump(example, sort_keys=False, allow_unicode=True))
+        mm.open(path)
+        assert 'Opened' in mm.message()
+        _, saved = read_zip(mm.save(tmp_path / f'out{i}'))
+        assert saved == example
+
+
+# mindmap-format.md: its examples and its checker must match what the editor does.
+
+FORMAT_DOC = (ROOT / 'mindmap-format.md').read_text()
+
+
+def doc_blocks(language):
+    """The doc's fenced code blocks in a language, as (text, marked_wrong) pairs."""
+    import re
+    return [(m['code'], bool(m['wrong']))
+            for m in re.finditer(r'(?P<wrong><!-- wrong -->\n)?```' + language + r'\n(?P<code>.*?)```', FORMAT_DOC, re.S)]
+
+
+def doc_checker():
+    """check_mind_map from the doc, bound to the schema."""
+    code, _ = doc_blocks('python')[0]
+    space = {}
+    exec(code, space)
+    return lambda text: space['check_mind_map'](text, SCHEMA)
+
+
+def test_the_format_doc_examples_are_valid_and_open_unchanged(mm, tmp_path):
+    good = [text for text, wrong in doc_blocks('yaml') if not wrong]
+    assert len(good) >= 6
+    for i, text in enumerate(good):
+        data = yaml.safe_load(text)
+        jsonschema.validate(data, SCHEMA)
+        mm.open(write_zip(tmp_path / f'doc{i}.zip', text))
+        assert 'Opened' in mm.message(), text
+        _, saved = read_zip(mm.save(tmp_path / f'out{i}'))
+        assert saved == data, text
+
+
+def test_the_complete_example_puts_branches_on_the_sides_the_doc_says(mm, tmp_path):
+    complete = doc_blocks('yaml')[-1][0]
+    mm.open(write_zip(tmp_path / 'c.zip', complete))
+    sides = mm.page.evaluate('root.children.map(c => c.title + ":" + c.side)')
+    assert sides == ['Travel:right', 'Budget:right', 'Places:left', 'To do: before we go:left']
+
+
+def test_the_doc_checker_passes_the_examples_and_finds_each_mistake():
+    check = doc_checker()
+    for text, wrong in doc_blocks('yaml'):
+        assert (check(text) != []) == wrong, text
+    good = 'root:\n  title: A\n  children:\n    b: {title: B}\n'
+    assert check(good) == []
+    assert 'duplicate' in check(good + '    b: {title: C}\n')[0]
+    assert 'not in the map' in check('root:\n  title: A\n  connectors: [{to: root/x}]\n')[0]
+    assert 'own node' in check('root:\n  title: A\n  connectors: [{to: root}]\n')[0]
+    assert check('root:\n  title: 2026\n')
+    assert check('root:\n  title: A\n  colour: red\n')
+    assert check('root:\n  title: A\n  children:\n    - title: B\n')
+    assert 'control character' in check('root:\n  title: A\n  note: "$\\\\frac{1}{2}$"\n'.replace('\\\\', '\\'))[0]
+    assert check('root: [\n')[0].startswith('not valid YAML')
+
+
+def test_the_doc_lists_exactly_the_icons_the_editor_knows(mm):
+    import re
+    known = mm.page.evaluate('[...ICONS.keys()]')
+    section = FORMAT_DOC.split('## Icons')[1].split('\n## ')[0]
+    listed = re.findall(r'`([^`]+)` \(', section)
+    assert listed == known
