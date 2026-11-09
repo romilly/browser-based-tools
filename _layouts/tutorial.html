@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title }}{% if page.step %} · {{ page.tutorial }}{% endif %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono&display=swap">
+<style>
+/* One narrow reading column; the editor's colours and type. */
+:root {
+  --bg: #ffffff; --fg: #1d282c; --muted: #5d6e74; --line: #d6dfe1; --code: #eef3f4; --accent: #2b6888;
+  --ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #172022; --fg: #e2eaec; --muted: #93a4a9; --line: #2b383b; --code: #1f2b2e; --accent: #86bddb; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 var(--ui); }
+.page { max-width: 40rem; margin: 0 auto; padding: 1.5rem max(16px, env(safe-area-inset-right)) 2rem max(16px, env(safe-area-inset-left)); }
+.where { margin: 0; font-size: .85rem; color: var(--muted); }
+.where a { color: inherit; }
+h1 { margin: .2rem 0 1.2rem; font-size: 1.6rem; line-height: 1.25; font-weight: 600; text-wrap: balance; }
+h2 { margin: 2rem 0 .6rem; font-size: 1.2rem; font-weight: 600; }
+p, ul, ol, table, pre { margin: 0 0 1rem; }
+ol, ul { padding-left: 1.5rem; }
+li + li { margin-top: .3rem; }
+a { color: var(--accent); }
+code { font: .88em var(--mono); background: var(--code); border-radius: 3px; padding: .05em .3em; }
+pre { background: var(--code); border-radius: 6px; padding: .75rem 1rem; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; font-size: .92rem; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid var(--line); padding: .35rem .7rem .35rem 0; text-align: left; vertical-align: top; }
+/* Screenshots: small, framed, and a tap opens the full-size picture. */
+.page img { display: block; width: auto; height: auto; max-width: min(100%, 26rem); margin: 1.2rem auto; border: 1px solid var(--line); border-radius: 6px; }
+@media (max-width: 30rem) { .page img { max-width: 80%; } }
+/* Back and forward arrows */
+.steps { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  margin-top: 2.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line); }
+.steps a, .steps span.gap { display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 50%; }
+.steps a { border: 1.5px solid var(--accent); color: var(--accent); }
+.steps a:hover, .steps a:focus-visible { background: var(--accent); color: var(--bg); outline: none; }
+.steps svg { width: 1.4rem; height: 1.4rem; }
+.count { font-size: .9rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="page">
+{% if page.step %}<p class="where"><a href="./">{{ page.tutorial }}</a> · Step {{ page.step }} of {{ page.steps }}</p>{% endif %}
+<h1>{{ page.title }}</h1>
+{{ content }}
+<nav class="steps" aria-label="Tutorial steps">
+{% if page.previous %}<a href="{{ page.previous | replace: 'index.md', './' | replace: '.md', '.html' }}" rel="prev" aria-label="Previous step" title="Previous step"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></a>{% else %}<span class="gap"></span>{% endif %}
+{% if page.step %}<span class="count">{{ page.step }} / {{ page.steps }}</span>{% endif %}
+{% if page.next %}<a href="{{ page.next | replace: '.md', '.html' }}" rel="next" aria-label="Next step" title="Next step"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>{% else %}<span class="gap"></span>{% endif %}
+</nav>
+</div>
+</body>
+</html>

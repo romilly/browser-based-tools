@@ -2,6 +2,8 @@
 import re
 import sys
 
+import yaml
+
 from conftest import ROOT
 
 sys.path.insert(0, str(ROOT / 'demos'))
@@ -25,11 +27,15 @@ def links(page):
     return re.findall(r'(?<!!)\[[^\]]*\]\(([^)#]+)\)', page.read_text())
 
 
+def front_matter(page):
+    """The page's front matter, as a dict."""
+    return yaml.safe_load(page.read_text().split('---\n')[1])
+
+
 def nav(page):
-    """The page's Previous, Contents and Next links (None where there isn't one)."""
-    text = page.read_text()
-    find = lambda word: (m.group(1) if (m := re.search(rf'\[[^\]]*{word}[^\]]*\]\(([^)]+)\)', text)) else None)
-    return find('Previous'), find('Contents'), find('Next')
+    """The step a page says it is, and the pages it says come before and after it."""
+    fm = front_matter(page)
+    return fm.get('step'), fm.get('previous'), fm.get('next')
 
 
 def test_the_landing_page_links_to_the_tutorial():
@@ -42,12 +48,34 @@ def test_the_contents_page_lists_every_step_page():
     assert sorted(p.name for p in steps()) == on_disk
 
 
-def test_each_step_links_to_the_previous_the_contents_and_the_next():
+def test_every_tutorial_page_uses_the_tutorial_layout():
+    for page in [CONTENTS, *steps()]:
+        assert front_matter(page)['layout'] == 'tutorial', page.name
+    assert (ROOT / '_layouts' / 'tutorial.html').exists()
+
+
+def test_each_step_knows_its_number_and_its_neighbours():
     pages = steps()
     for i, page in enumerate(pages):
-        previous = pages[i - 1].name if i else None
+        previous = pages[i - 1].name if i else 'index.md'
         following = pages[i + 1].name if i + 1 < len(pages) else None
-        assert nav(page) == (previous, 'index.md', following), page.name
+        assert nav(page) == (i + 1, previous, following), page.name
+    assert nav(CONTENTS) == (None, None, pages[0].name)
+
+
+def test_step_pages_have_no_heading_or_links_of_their_own():
+    """The layout draws the title and the arrows, so the Markdown mustn't repeat them."""
+    for page in steps():
+        body = page.read_text().split('---\n', 2)[2]
+        assert not body.lstrip().startswith('#'), page.name
+        assert 'Previous' not in body and 'Next:' not in body, page.name
+
+
+def test_the_layout_draws_arrows_and_the_page_title():
+    layout = (ROOT / '_layouts' / 'tutorial.html').read_text()
+    assert '{{ page.title }}' in layout
+    assert 'aria-label="Previous step"' in layout and 'aria-label="Next step"' in layout
+    assert 'site.title' not in layout
 
 
 def test_the_contents_page_starts_the_tutorial():

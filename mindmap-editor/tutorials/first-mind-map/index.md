@@ -1,12 +1,12 @@
 ---
+layout: tutorial
 title: Your first mind map
+next: 01-start-a-new-map.md
 ---
-
-# Your first mind map
 
 In this tutorial you'll plan a holiday in the Netherlands with the Mind Map Editor. By the end you'll have this map, saved as a file on your own computer:
 
-![The finished map: "Holiday in the Netherlands" in the centre, with Travel, Hotel in Utrecht, Things to do and Budget around it](../images/finished.png)
+[![The finished map: "Holiday in the Netherlands" in the centre, with Travel, Hotel in Utrecht, Things to do and Budget around it](../images/finished.png)](../images/finished.png)
 
 On the way you'll learn how to:
 
@@ -49,6 +49,5 @@ Where the tutorial says to press an arrow key to move around, tap the branch you
 10. [Tidy up](10-tidy-up.md)
 11. [Save your map, and open it again](11-save-and-open.md)
 
-**[Start with step 1: Start a new map →](01-start-a-new-map.md)**
 
 [Back to the Mind Map Editor page](../../index.md)
