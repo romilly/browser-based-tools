@@ -8,7 +8,9 @@ Build a mind map in the style of [Freeplane](https://docs.freeplane.org/): a cen
 
 **[Open the Mind Map Editor](../mindmap-editor.html)**
 
-**[Watch the one-minute demo](https://github.com/romilly/browser-based-tools/blob/main/demos/mindmap-demo.mp4)**
+<video controls preload="metadata" width="100%" src="https://media.githubusercontent.com/media/romilly/browser-based-tools/main/demos/mindmap-demo.mp4">
+  <a href="https://media.githubusercontent.com/media/romilly/browser-based-tools/main/demos/mindmap-demo.mp4">Download the demo video</a>
+</video>
 
 ## What it does
 

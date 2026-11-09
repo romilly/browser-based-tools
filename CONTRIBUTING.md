@@ -68,4 +68,4 @@ It records the published page by default; pass `url='file:///…/mindmap-editor.
 
 The picture attached in the demo is `demos/harwich_ferry.png`; pass `image=` to use another PNG or JPEG.
 
-Videos are stored with Git LFS (see `.gitattributes`). GitHub Pages doesn't serve LFS files, so link to a video on github.com rather than on the published site.
+Videos are stored with Git LFS (see `.gitattributes`). GitHub Pages serves only the small LFS pointer file, not the video, so a page plays a video from GitHub's media server instead: `https://media.githubusercontent.com/media/romilly/browser-based-tools/main/demos/<file>.mp4`, used as the `src` of a `<video controls>` element.
