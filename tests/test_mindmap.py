@@ -507,3 +507,105 @@ def test_markdown_notes_are_saved_unchanged(mm, tmp_path):
     _, data = read_zip(mm.save(tmp_path))
     jsonschema.validate(data, SCHEMA)
     assert data['root']['children']['crudulator']['note'] == text
+
+
+# Maths in notes: LaTeX between $...$ (in a line) or $$...$$ (on its own), drawn by MathJax.
+
+def wait_for_maths(mm):
+    mm.page.wait_for_function('!document.querySelector("#noteView .math:not(.done)")')
+
+
+def test_inline_maths_is_drawn(mm):
+    write_note(mm, 'CRUDulator', 'Energy is $E = mc^2$ here')
+    wait_for_maths(mm)
+    m = note_view(mm).locator('mjx-container')
+    assert m.count() == 1
+    assert m.get_attribute('display') is None
+    assert 'Energy is' in note_view(mm).inner_text()
+    # the copy of the formula kept for screen readers is hidden, so the formula is shown once
+    clip = note_view(mm).locator('mjx-assistive-mml').evaluate('e => getComputedStyle(e).clip')
+    assert clip.startswith('rect(')
+
+
+def test_display_maths_is_drawn_on_its_own(mm):
+    write_note(mm, 'CRUDulator', 'Sum:\n\n$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$\n')
+    wait_for_maths(mm)
+    assert note_view(mm).locator('mjx-container[display="true"]').count() == 1
+
+
+def test_underscores_in_maths_are_not_italics(mm):
+    write_note(mm, 'CRUDulator', '$a_1 + b_1$ and $c_2$')
+    wait_for_maths(mm)
+    assert note_view(mm).locator('em').count() == 0
+    assert note_view(mm).locator('mjx-container').count() == 2
+
+
+def test_escaped_dollars_stay_dollars(mm):
+    write_note(mm, 'CRUDulator', 'Costs \\$5 and \\$10')
+    assert note_view(mm).inner_text().strip() == 'Costs $5 and $10'
+    assert note_view(mm).locator('mjx-container, .math').count() == 0
+
+
+def test_dollars_in_code_are_left_alone(mm):
+    write_note(mm, 'CRUDulator', 'Run `echo $HOME $PATH`')
+    assert note_view(mm).locator('code').inner_text() == 'echo $HOME $PATH'
+    assert note_view(mm).locator('.math').count() == 0
+
+
+def test_a_bad_formula_shows_an_error_and_the_rest_of_the_note(mm):
+    write_note(mm, 'CRUDulator', 'Before $\\frac{1}$ after')
+    wait_for_maths(mm)
+    text = note_view(mm).inner_text()
+    assert 'Before' in text and 'after' in text
+    assert note_view(mm).locator('[data-mjx-error]').count() >= 1
+
+
+def test_mathjax_is_only_loaded_for_notes_with_maths(mm):
+    write_note(mm, 'CRUDulator', '**no maths here**')
+    assert mm.page.locator('script[src*="mathjax"]').count() == 0
+    write_note(mm, 'SQLite browser', '$x$')
+    wait_for_maths(mm)
+    assert mm.page.locator('script[src*="mathjax"]').count() == 1
+
+
+def test_maths_is_saved_unchanged(mm, tmp_path):
+    text = 'Area $A = \\pi r^2$\n\n$$\\int_0^1 x\\,dx = \\tfrac12$$\n'
+    write_note(mm, 'CRUDulator', text)
+    _, data = read_zip(mm.save(tmp_path))
+    assert data['root']['children']['crudulator']['note'] == text
+
+
+def test_prices_without_backslashes_stay_text(mm):
+    write_note(mm, 'CRUDulator', 'Tickets $5 and $10 each')
+    assert note_view(mm).inner_text().strip() == 'Tickets $5 and $10 each'
+    assert note_view(mm).locator('.math').count() == 0
+
+
+def test_a_script_link_in_maths_cannot_run(mm, tmp_path):
+    mm.open(write_zip(tmp_path / 'evil.zip', 'root:\n  title: Evil\n  children:\n    a:\n      title: A\n'
+                      '      note: \'Click $\\href{javascript:window.pwned=1}{here}$\'\n'))
+    mm.node('A').click()
+    wait_for_maths(mm)
+    for link in note_view(mm).locator('a').all():
+        link.click()
+    mm.page.wait_for_timeout(200)
+    assert mm.page.evaluate('window.pwned') is None
+    assert note_view(mm).locator('[href^="javascript"]').count() == 0
+
+
+def test_a_web_link_in_maths_works_and_opens_in_a_new_tab(mm):
+    write_note(mm, 'CRUDulator', 'See $\\href{https://example.org}{x^2}$')
+    wait_for_maths(mm)
+    a = note_view(mm).locator('mjx-container a')
+    assert a.get_attribute('href') == 'https://example.org'
+    assert a.get_attribute('target') == '_blank'
+    assert a.locator('use').count() >= 1        # the glyphs inside the link are still drawn
+
+
+def test_help_has_a_latex_guide_with_a_link_to_more(mm):
+    mm.page.click('#bHelp')
+    section = mm.page.locator('#dlg section', has=mm.page.locator('h3', has_text='Maths in notes'))
+    assert '\\frac{a}{b}' in section.inner_text()
+    link = section.locator('a')
+    assert link.get_attribute('href') == 'https://www.overleaf.com/learn/latex/Mathematical_expressions'
+    assert link.get_attribute('target') == '_blank'

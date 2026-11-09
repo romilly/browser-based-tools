@@ -140,6 +140,8 @@ aside input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #noteView pre code{padding:0;background:none}
 #noteView blockquote{border-left:3px solid var(--line);padding-left:8px;color:var(--muted)}
 #noteView img{max-width:100%}
+#noteView .math[data-display]{display:block;overflow-x:auto;overflow-y:hidden}
+#noteView mjx-container[display="true"]{margin:.4em 0!important}
 #noteView table{border-collapse:collapse} #noteView th,#noteView td{border:1px solid var(--line);padding:2px 6px}
 #dlg{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);display:grid;place-items:center;z-index:20;
   padding:16px}
@@ -152,6 +154,10 @@ aside input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .keys{font-size:13.5px;display:grid;grid-template-columns:max-content 1fr;gap:5px 14px;margin:0}
 .keys dt{font-size:13.5px;color:var(--fg);white-space:nowrap}
 .keys dd{margin:0;color:var(--muted)}
+.keys.tex{grid-template-columns:minmax(0,max-content) 1fr}
+.keys.tex dt{white-space:normal}
+.keys code,#dlg p code{font:12.5px var(--mono);overflow-wrap:anywhere}
+#dlg a{color:var(--accent)}
 .keys kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--bg)}
 
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;
@@ -298,6 +304,24 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <h3>Notes</h3>
       <p>Select a node and type in the Note panel. Nodes with a note show a small page icon. Press <kbd>Esc</kbd> to leave the note and go back to the map.</p>
       <p>Notes use Markdown: <code>**bold**</code>, <code>*italic*</code>, <code>- </code> or <code>1. </code> for lists, <code>#</code> for a heading, <code>`code`</code> and <code>[text](https://…)</code> for a link. When you leave the note it is shown formatted; click or tap it to edit it again. Links in a note open in a new tab.</p>
+    </section>
+    <section>
+      <h3>Maths in notes</h3>
+      <p>Write formulas in LaTeX. Put <code>$…$</code> round a formula within a line, and <code>$$…$$</code> round one that should stand on its own. Type <code>\$</code> for a dollar sign that isn't maths; a price such as <code>$5</code> is usually left alone anyway.</p>
+      <dl class="keys tex">
+        <dt><code>x^2</code> <code>x^{10}</code></dt><dd>Superscript. Use braces for more than one character.</dd>
+        <dt><code>a_1</code> <code>a_{ij}</code></dt><dd>Subscript.</dd>
+        <dt><code>\frac{a}{b}</code></dt><dd>Fraction.</dd>
+        <dt><code>\sqrt{x}</code> <code>\sqrt[3]{x}</code></dt><dd>Square root, cube root.</dd>
+        <dt><code>\alpha \beta \pi \Omega</code></dt><dd>Greek letters; a capital first letter gives a capital.</dd>
+        <dt><code>\sum_{i=1}^{n}</code> <code>\int_0^1</code></dt><dd>Sum and integral, with limits.</dd>
+        <dt><code>\le \ge \ne \approx</code></dt><dd>≤ ≥ ≠ ≈</dd>
+        <dt><code>\times \cdot \pm \infty</code></dt><dd>× · ± ∞</dd>
+        <dt><code>\to \Rightarrow \in \subset</code></dt><dd>→ ⇒ ∈ ⊂</dd>
+        <dt><code>\left( \frac{a}{b} \right)</code></dt><dd>Brackets that grow to fit.</dd>
+        <dt><code>\text{if } x &gt; 0</code></dt><dd>Ordinary words inside a formula.</dd>
+      </dl>
+      <p>For more, see Overleaf's <a href="https://www.overleaf.com/learn/latex/Mathematical_expressions" target="_blank" rel="noopener noreferrer">Mathematical expressions</a> guide. It is written for whole LaTeX documents, so skip the parts about packages and numbered equations; the symbols and examples work in notes. A formula with a mistake is shown in red.</p>
     </section>
     <section>
       <h3>Saving</h3>
@@ -974,11 +998,79 @@ function showNote() {
   ta.value = sel.note || '';
   const formatted = canFormat() && !!ta.value.trim();
   if (formatted) {
-    const html = DOMPurify.sanitize(marked.parse(ta.value), { RETURN_DOM_FRAGMENT: true });
+    const { md, found } = takeMaths(ta.value);
+    const html = DOMPurify.sanitize(marked.parse(md), { RETURN_DOM_FRAGMENT: true });
     for (const a of html.querySelectorAll('a')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+    putMaths(html, found);
     noteView.replaceChildren(html);
+    drawMaths(noteView);
   }
   noteView.hidden = !formatted; ta.hidden = formatted;
+}
+
+// LaTeX maths in notes: $...$ within a line, $$...$$ on its own. Formulas are taken out before marked
+// (which would read a_1 ... b_1 as italics), put back after sanitising, then drawn by MathJax.
+// Code and \$ are skipped. As in Pandoc, an opening $ can't be followed by a space and a closing $
+// can't follow a space or be followed by a digit, so "$5 and $10" stays text.
+const MATH_RE = /(```[\s\S]*?```|`[^`\n]*`|\\\$)|\$\$([\s\S]+?)\$\$|\$(?![\s$])((?:\\\$|[^$\n])+?)(?<![\s\\])\$(?!\d)/g;
+const SLOT = /MATHJAXSLOT(\d+)X/;
+function takeMaths(text) {
+  const found = [];
+  const md = text.replace(MATH_RE, (m, keep, display, inline) => {
+    if (keep) return m;
+    found.push({ tex: display ?? inline, display: display != null });
+    return `MATHJAXSLOT${found.length - 1}X`;
+  });
+  return { md, found };
+}
+function putMaths(frag, found) {
+  if (!found.length) return;
+  const walk = document.createTreeWalker(frag, NodeFilter.SHOW_TEXT), texts = [];
+  while (walk.nextNode()) if (SLOT.test(walk.currentNode.data)) texts.push(walk.currentNode);
+  for (const t of texts) t.replaceWith(...t.data.split(/MATHJAXSLOT(\d+)X/).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const f = found[+part], s = document.createElement('span');
+    s.className = 'math'; s.dataset.tex = f.tex;
+    if (f.display) s.dataset.display = '';
+    s.textContent = f.display ? `$$${f.tex}$$` : `$${f.tex}$`;    // shown as typed until MathJax draws it
+    return s;
+  }));
+}
+// MathJax is large, so it is loaded only when a note first needs it.
+let mathJaxP = null;
+function loadMathJax() {
+  return mathJaxP || (mathJaxP = new Promise((ok, fail) => {
+    window.MathJax = { startup: { typeset: false }, options: { enableMenu: false },
+                       svg: { fontCache: 'local' } };
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg-full.js';
+    // MathJax's stylesheet hides the copy of each formula kept for screen readers, and styles errors.
+    s.onload = () => MathJax.startup.promise.then(() => { document.head.append(MathJax.svgStylesheet()); ok(); }, fail);
+    s.onerror = () => { mathJaxP = null; s.remove(); fail(new Error('MathJax did not load')); };
+    document.head.append(s);
+  }));
+}
+// \href in a formula makes a link, and an opened file could aim one at javascript:. MathJax's own
+// "safe" extension doesn't apply to tex2svg, so links are checked here: only web and mail links stay.
+// The hidden MathML copy for screen readers carries the link too, so every element with a link is checked.
+function safeLinks(out) {
+  for (const el of out.querySelectorAll('[href], [*|href]')) {
+    const h = (el.getAttribute('href') || el.getAttribute('xlink:href') || '').trim();
+    if (el.localName === 'use' && h.startsWith('#')) continue;              // MathJax's glyphs
+    if (/^(https?:|mailto:)/i.test(h)) { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer'); }
+    else { el.removeAttribute('href'); el.removeAttribute('xlink:href'); }
+  }
+  return out;
+}
+async function drawMaths(box) {
+  const spans = [...box.querySelectorAll('.math:not(.done)')];
+  if (!spans.length) return;
+  try { await loadMathJax(); }
+  catch (e) { spans.forEach(s => s.classList.add('done')); return; }     // leave the formulas as typed
+  for (const s of spans) {
+    s.replaceChildren(safeLinks(MathJax.tex2svg(s.dataset.tex, { display: 'display' in s.dataset })));
+    s.classList.add('done');
+  }
 }
 function editNote() { noteView.hidden = true; ta.hidden = false; ta.focus(); }
 noteView.addEventListener('click', e => { if (!e.target.closest('a')) editNote(); });
