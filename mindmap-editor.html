@@ -348,7 +348,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <section>
       <h3>Saving</h3>
       <p><b>Save</b> (in the File menu) downloads the map as a <code>.zip</code> file holding one YAML file. <b>Open</b> reads one of those, or a plain <code>.yaml</code> file, and replaces the current map; you can also drop a file onto the map. Undo brings back the map you replaced, until you reload the page.</p>
-      <p><b>Export as Markdown</b> (also in the File menu) downloads the map as a <code>.zip</code> file of linked Markdown pages, one per branch, in folders arranged like the map, with the images. Each page has the branch's icons, title, picture, web link and note, then links to the branches under it, to its connectors' targets and back up to its parent. Notes and maths are copied as they are, so they show on GitHub or in Obsidian. The editor can't open an export again: use Save for that.</p>
+      <p><b>Export as Markdown</b> (also in the File menu) downloads the map as a <code>.zip</code> file of linked Markdown pages, one per branch, in folders arranged like the map, with the images. Each page has the branch's icons, title, picture, web link and note, then links to the branches under it and to its connectors' targets, and at the bottom to the previous and next branch and back up to its parent. Notes and maths are copied as they are, so they show on GitHub or in Obsidian. The editor can't open an export again: use Save for that.</p>
       <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
       <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
     </section>
@@ -955,7 +955,12 @@ function nodeMarkdown(n, kp, hasImage) {
     parts.push('## See also', cs.map(c => `- [${mdText(findById(root, c.to).title)}](${top}${pageOf(kp, c.to)})`
                                             + (c.label ? ': ' + mdText(c.label) : '')).join('\n'));
   const up = parents.get(n.id);
-  if (up) parts.push('---', `Up: [${mdText(up.title)}](../index.md)`);
+  if (up) {
+    const sibs = ordered(up), i = sibs.indexOf(n), prev = sibs[i - 1], next = sibs[i + 1];
+    const to = (label, s) => `${label}: [${mdText(s.title)}](../${kp.keys.get(s.id)}/index.md)`;
+    parts.push('---', [prev && to('Previous', prev), `Up: [${mdText(up.title)}](../index.md)`, next && to('Next', next)]
+      .filter(Boolean).join(' · '));
+  }
   return parts.join('\n\n') + '\n';
 }
 async function exportMarkdown() {

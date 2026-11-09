@@ -1003,7 +1003,7 @@ $$C = n \\times (h + f)$$
 
 ---
 
-Up: [Holiday](../index.md)
+Up: [Holiday](../index.md) · Next: [Places](../places/index.md)
 '''
     assert files['holiday/index.md'] == '''# Holiday
 
@@ -1035,13 +1035,21 @@ def test_every_relative_link_in_the_export_names_a_file_in_it(mm, tmp_path):
         for target in re.findall(r'\]\(([^)]+)\)', text):
             targets += 1
             assert posixpath.normpath(posixpath.join(posixpath.dirname(name), target)) in files, (name, target)
-    assert targets == 13
+    assert targets == 17
+
+
+def test_pages_link_to_the_previous_and_next_sibling(mm, tmp_path):
+    open_trip(mm, tmp_path)
+    files = markdown_files(export_markdown(mm, tmp_path))
+    assert files['holiday/travel/trains/index.md'].endswith(
+        '\n---\n\nPrevious: [Ferry](../ferry/index.md) · Up: [Travel](../index.md)\n')
+    assert files['holiday/places/utrecht/index.md'].endswith('\n---\n\nUp: [Places](../index.md)\n')
 
 
 def test_a_missing_image_is_left_out_and_reported(mm, tmp_path):
     open_trip(mm, tmp_path, image=False)
     files = markdown_files(export_markdown(mm, tmp_path))
-    assert files['holiday/travel/ferry/index.md'] == '# Ferry\n\n---\n\nUp: [Travel](../index.md)\n'
+    assert files['holiday/travel/ferry/index.md'] == '# Ferry\n\n---\n\nUp: [Travel](../index.md) · Next: [Trains](../trains/index.md)\n'
     assert not any(name.endswith('.png') for name in files)
     assert '1 image missing' in mm.message()
 
