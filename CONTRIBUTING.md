@@ -66,6 +66,6 @@ await record_mindmap_demo('mindmap-demo.mp4')
 
 It records the published page by default; pass `url='file:///…/mindmap-editor.html'` to record your local copy.
 
-The picture attached in the demo is `demos/harwich_ferry.png`; pass `image=` to use another PNG or JPEG.
+The picture attached in the demo is `mindmap-editor/tutorials/images/harwich_ferry.png` (shared with the tutorial); pass `image=` to use another PNG or JPEG.
 
 Videos are stored with Git LFS (see `.gitattributes`). GitHub Pages serves only the small LFS pointer file, not the video, so a page plays a video from GitHub's media server instead: `https://media.githubusercontent.com/media/romilly/browser-based-tools/main/demos/<file>.mp4`, used as the `src` of a `<video controls>` element.

@@ -25,7 +25,7 @@ from playwright.async_api import async_playwright
 
 PAGES_URL = 'https://romilly.github.io/browser-based-tools/mindmap-editor.html'
 SIZE = {'width': 1280, 'height': 720}
-IMAGE = Path(__file__).with_name('harwich_ferry.png')   # the picture attached in the demo
+IMAGE = Path(__file__).resolve().parent.parent / 'mindmap-editor' / 'tutorials' / 'images' / 'harwich_ferry.png'   # the picture attached in the demo
 
 # A pointer that follows the mouse, a ring on each click, and a caption box.
 OVERLAY_JS = r"""

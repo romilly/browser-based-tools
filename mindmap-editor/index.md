@@ -42,6 +42,7 @@ Editing works without them, with notes shown as plain text.
 
 ## Documentation
 
+- **Tutorial:** [Your first mind map](tutorials/first-mind-map.md) — plan a holiday and learn every main feature in about 20 minutes.
 - **In the tool:** click **Help**, or press `?`, for every key and menu, and a short LaTeX guide.
 - **Reference:** [The file format](reference/file-format.md) — how a map is stored, for people and AI agents that write map files, with a checker you can paste into Jupyter. The machine-readable definition is [`mindmap-schema.json`](../mindmap-schema.json).
 
