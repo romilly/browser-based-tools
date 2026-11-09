@@ -33,7 +33,7 @@ pre code { background: none; padding: 0; }
 table { border-collapse: collapse; font-size: .92rem; display: block; overflow-x: auto; }
 th, td { border-bottom: 1px solid var(--line); padding: .35rem .7rem .35rem 0; text-align: left; vertical-align: top; }
 /* Screenshots: small, framed, and a tap opens the full-size picture. */
-.page img { display: block; width: 100%; max-width: 26rem; margin: 1.2rem auto; border: 1px solid var(--line); border-radius: 6px; }
+.page img { display: block; width: auto; height: auto; max-width: min(100%, 26rem); margin: 1.2rem auto; border: 1px solid var(--line); border-radius: 6px; }
 @media (max-width: 30rem) { .page img { max-width: 80%; } }
 /* Back and forward arrows */
 .steps { display: flex; align-items: center; justify-content: space-between; gap: 1rem;

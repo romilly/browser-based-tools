@@ -22,6 +22,20 @@ PAGES_URL = 'https://romilly.github.io/browser-based-tools/mindmap-editor.html'
 OUT = Path(__file__).resolve().parent.parent / 'mindmap-editor' / 'tutorials' / 'images'
 IMAGE = OUT / 'harwich_ferry.png'
 SIZE = {'width': 1280, 'height': 720}
+MARGIN = 20   # space left round the cropped part, in pixels
+PANEL = ('#noteFor', '#link', '#noteView:not([hidden]) > *')   # the side panel, for steps about notes and links
+
+# The smallest box round every branch, connector and label (and any extra elements), plus MARGIN, inside the window.
+CROP = """([extra, wholeMap]) => {
+  const els = [...document.querySelectorAll(wholeMap ? '#stage .node, #edges path:not(.hit), #edges text' : wholeMap === false ? '#stage .node.sel' : ':not(*)')];
+  for (const sel of extra) els.push(...document.querySelectorAll(sel));
+  const rects = els.map(e => e.getBoundingClientRect()).filter(r => r.width && r.height);
+  const x0 = Math.max(0, Math.min(...rects.map(r => r.left)) - %(m)d);
+  const y0 = Math.max(0, Math.min(...rects.map(r => r.top)) - %(m)d);
+  const x1 = Math.min(innerWidth, Math.max(...rects.map(r => r.right)) + %(m)d);
+  const y1 = Math.min(innerHeight, Math.max(...rects.map(r => r.bottom)) + %(m)d);
+  return {x: x0, y: y0, width: x1 - x0, height: y1 - y0};
+}""" % {'m': MARGIN}
 
 # Every screenshot the tutorial uses, in the order they are made.
 SHOTS = ['new-map', 'main-branches', 'detail', 'note', 'link', 'picture', 'icons',
@@ -52,11 +66,13 @@ class Tutorial:
         await self.page.click(f'#menubar button.mb:text-is("{name}")')
         await self.page.click(item)
 
-    async def shot(self, name):
+    async def shot(self, name, *also, whole_map=True):
+        """Save a picture cropped to the map's branches and connectors (or, with whole_map=False,
+        just the selected branch; with whole_map=None, nothing from the map), plus any `also` selectors."""
         await self.page.wait_for_timeout(300)
         await self.page.mouse.move(0, SIZE['height'] - 1)   # no hover tooltips in the pictures
-        await self.page.screenshot(path=str(self.out / f'{name}.png'))
-
+        box = await self.page.evaluate(CROP, [list(also), whole_map])
+        await self.page.screenshot(path=str(self.out / f'{name}.png'), clip=box)
 
 async def run_steps(t, image, folder):
     page = t.page
@@ -91,12 +107,12 @@ async def run_steps(t, image, folder):
     await t.select('Harwich ferry')
     await page.click('#note')
     await t.type('Book the **night ferry** from Harwich.\n\n- bikes go free\n- cabin for two', then='Escape')
-    await t.shot('note')
+    await t.shot('note', *PANEL, whole_map=False)
 
     # 6. A web link
     await page.click('#link')
     await t.type('www.stenaline.co.uk', then='Enter')
-    await t.shot('link')
+    await t.shot('link', *PANEL, whole_map=False)
 
     # 7. A picture
     async with page.expect_file_chooser() as chooser:
@@ -128,7 +144,7 @@ async def run_steps(t, image, folder):
     await page.click('#note')
     await t.type('Total for $n$ nights:\n\n$$C = n \\times (h + f)$$', then='Escape')
     await page.wait_for_selector('#noteView mjx-container', timeout=20000)
-    await t.shot('maths')
+    await t.shot('maths', *PANEL, whole_map=None)
 
     # 11. Tidy up: move Cycling up, fold Things to do
     await t.select('Cycling')
@@ -149,7 +165,7 @@ async def run_steps(t, image, folder):
     await (await chooser.value).set_files(str(saved))
     await page.wait_for_selector('.pic img')
     await t.select('Harwich ferry')
-    await t.shot('opened')
+    await t.shot('opened', '#toast')
 
     await t.select('Holiday in the Netherlands')
     await page.evaluate('document.querySelector("#toast").hidden = true')
@@ -166,7 +182,7 @@ async def make_tutorial_screenshots(out=OUT, url=PAGES_URL, prepare_page=None, i
     with tempfile.TemporaryDirectory() as folder:
         async with async_playwright() as p:
             browser = await p.chromium.launch()
-            context = await browser.new_context(viewport=SIZE, device_scale_factor=1,
+            context = await browser.new_context(viewport=SIZE, device_scale_factor=2,
                                                 color_scheme='light', accept_downloads=True)
             page = await context.new_page()
             if prepare_page:
