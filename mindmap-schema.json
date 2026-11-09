@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Mind Map Schema",
-  "description": "Schema for the Mind Map Editor's YAML format (mindmap-editor.html), which is designed to map onto Freeplane. mindmap-format.md describes the format in full. Two rules can't be checked by this schema: every connector's 'to' must be the path of a node in the same map, and keys must be unique among siblings (YAML parsers reject duplicate keys). The editor writes files that match this schema; when opening, it is more lenient, ignoring unknown fields and accepting other key characters.",
+  "description": "Schema for the Mind Map Editor's YAML format (mindmap-editor.html), which is designed to map onto Freeplane. mindmap-format.md describes the format in full. Two rules can't be checked by this schema: every connector's 'to' must be the path of a node in the same map, and keys must be unique among siblings (YAML parsers reject duplicate keys). An image path should also name a file in the same zip; if it doesn't, the editor shows a placeholder. The editor writes files that match this schema; when opening, it is more lenient, ignoring unknown fields and accepting other key characters.",
   "definitions": {
     "node": {
       "type": "object",
@@ -28,6 +28,11 @@
         "link": {
           "type": "string",
           "description": "An absolute web address (URL) attached to the node, such as https://example.org"
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\\\]+\\.([pP][nN][gG]|[jJ][pP][eE]?[gG])$",
+          "description": "A PNG or JPEG image shown under the title: the path of the image file inside the saved zip, relative to the YAML file (the editor uses images/<name>_<hash>.png or .jpg). Use '/' between folders; no leading '/' and no '..'"
         },
         "connectors": {
           "type": "array",
@@ -63,7 +68,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "A node: a title, with optional icons, note, link, connectors and child nodes"
+      "description": "A node: a title, with optional icons, image, note, link, connectors and child nodes"
     }
   },
   "type": "object",

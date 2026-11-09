@@ -7,20 +7,23 @@ The machine-readable definition is [`mindmap-schema.json`](mindmap-schema.json) 
 ## In brief
 
 - A map is a YAML document with a single top-level key, `root`, holding the central node.
-- Every node has a `title` (a string). It may also have `icons`, `note`, `link`, `connectors` and `children`. No other fields are allowed.
+- Every node has a `title` (a string). It may also have `icons`, `image`, `note`, `link`, `connectors` and `children`. No other fields are allowed.
 - `children` is a mapping, not a list. Each key names a child among its siblings and is made of ASCII letters, digits and underscores. The children appear in the order they are written.
 - A connector's `to` is the path of another node: `root`, then each child key, separated by `/`. The node must exist in the same map.
 - Notes are Markdown, with LaTeX maths between `$…$` or `$$…$$`. Write them as YAML block scalars (`|`).
 - Quote any title that YAML might read as a number, boolean, date or null.
+- An `image` is the path of a PNG or JPEG file inside the zip, such as `images/ferry.jpg`.
 
 ## Files
 
-The editor saves a `.zip` file holding one YAML file. Both are named after the root's title, for example `holiday_in_the_netherlands.zip` containing `holiday_in_the_netherlands.yaml`.
+The editor saves a `.zip` file holding one YAML file, plus an `images` folder if any node has an image. The zip and the YAML file are named after the root's title, for example `holiday_in_the_netherlands.zip` containing `holiday_in_the_netherlands.yaml` and `images/harwich_ferry_3fa2c1d0.jpg`.
 
 It opens either:
 
 - a `.zip` file. It reads the first file in the archive whose name ends in `.yaml` or `.yml`, ignoring folders and anything under `__MACOSX/`; or
-- a plain `.yaml` or `.yml` file.
+- a plain `.yaml` or `.yml` file. A plain file can't carry images, so any images it names show as placeholders.
+
+Image paths are relative to the YAML file's folder inside the zip. If the YAML file is at `trip/map.yaml`, then `image: images/ferry.jpg` means `trip/images/ferry.jpg`.
 
 Files are UTF-8 text. Indent with spaces, never tabs (YAML forbids tabs for indentation). The editor uses two spaces per level.
 
@@ -39,6 +42,7 @@ The document is a mapping with exactly one key, `root`. That shown above is a co
 |---|---|---|---|
 | `title` | string | yes | The text shown on the node. Plain text, not Markdown. May contain line breaks. Keep it short (a few words); put detail in the note. |
 | `icons` | list of strings | no | Icons shown before the title, in order. Use the names in [Icons](#icons). |
+| `image` | string | no | A PNG or JPEG shown under the title: the path of the image file inside the zip. See [Images](#images). |
 | `note` | string | no | A note shown in the side panel, in Markdown with LaTeX maths. See [Notes](#notes). |
 | `link` | string | no | A web address. The node shows a link icon that opens it in a new tab. Use an absolute URL starting with `https://` (or `http://`); the editor doesn't add `https://` to links read from a file. |
 | `connectors` | list of mappings | no | Dashed arrows from this node to other nodes. See [Connectors](#connectors). |
@@ -131,6 +135,26 @@ Icons use the names of Freeplane's built-in icons, so a future Freeplane export 
 
 Names are case-sensitive (`Mail` has a capital M). An unknown name is allowed: the editor keeps it, saves it, and shows it as a small ▫ with the name as a tooltip. Don't repeat a name on the same node; the editor treats choosing an icon again as removing it.
 
+## Images
+
+A node can have one image, shown under its title and scaled to fit within 200 × 200 pixels on the map (smaller images are shown at their own size).
+
+```yaml
+root:
+  title: Birds
+  children:
+    robin:
+      title: Robin
+      image: images/robin.jpg
+```
+
+- `image` is the path of the file inside the zip, relative to the YAML file: folders separated by `/`, no leading `/`, and no `..`.
+- The file must be a PNG or JPEG, ending in `.png`, `.jpg` or `.jpeg` (in any case). Other formats aren't shown.
+- Put the image file into the zip at that path. If it isn't there, the editor shows an "Image missing" placeholder, keeps the `image` field, and reports how many images are missing when it opens and saves the file.
+- File names are up to you. The editor names the images it adds `images/<name>_<hash>.<png or jpg>`: the original file name made into a key by the rule in [Children and keys](#children-and-keys), then eight hexadecimal digits from a SHA-256 hash of the bytes. It keeps your names when it saves a file it opened.
+- Several nodes can share one image file.
+- Large images are fine in a file, but the editor shrinks images it adds to 1600 pixels on the longer side, so keep yours to about that size.
+
 ## Notes
 
 A note is Markdown (GitHub-flavoured), shown formatted in the side panel.
@@ -209,6 +233,7 @@ root:
 - Which side of the root a branch is on (see [Left and right of the root](#left-and-right-of-the-root)).
 - Which branches are folded. Every branch is unfolded when a file is opened.
 - Positions. The editor lays the map out itself.
+- Image sizes. The editor works them out from the image files.
 
 ## Checking a file
 
@@ -216,14 +241,16 @@ A file is correct if:
 
 1. it is valid YAML, with no duplicate keys;
 2. it is valid against `mindmap-schema.json`;
-3. every connector's `to` is the path of a node in the map, other than the connector's own node; and
-4. no text contains control characters such as a form feed. These are almost always LaTeX written in a double-quoted string.
+3. every connector's `to` is the path of a node in the map, other than the connector's own node;
+4. no text contains control characters such as a form feed. These are almost always LaTeX written in a double-quoted string; and
+5. in a zip, every `image` names a file in the zip.
 
-This Python function checks all four. It needs `pyyaml` and `jsonschema`, and can be pasted into a Jupyter notebook.
+These Python functions check them: `check_mind_map` checks YAML text (and its images, if you pass the names of the files beside it), and `check_mind_map_zip` checks a whole `.zip` file. It needs `pyyaml` and `jsonschema`, and can be pasted into a Jupyter notebook.
 
 ```python
 import json
 import re
+import zipfile
 import yaml
 import jsonschema
 
@@ -242,8 +269,12 @@ class _UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-def check_mind_map(text, schema):
-    """Return a list of problems with a mind map's YAML text. An empty list means the file is good."""
+def check_mind_map(text, schema, image_files=None):
+    """Return a list of problems with a mind map's YAML text. An empty list means the file is good.
+
+    image_files, if given, is the set of file paths available beside the YAML file (as in a zip);
+    every node's image must then be one of them.
+    """
     try:
         data = yaml.load(text, Loader=_UniqueKeyLoader)
     except yaml.YAMLError as e:
@@ -266,6 +297,8 @@ def check_mind_map(text, schema):
                 problems.append(f'{path}: connector to {c["to"]}, which is not in the map')
             elif c['to'] == path:
                 problems.append(f'{path}: connector to its own node')
+        if image_files is not None and 'image' in node and node['image'] not in image_files:
+            problems.append(f'{path}: image {node["image"]} is not in the zip')
         texts = {'title': node['title'], 'note': node.get('note', ''), 'link': node.get('link', '')}
         texts.update({f'label of connector {i + 1}': c.get('label', '')
                       for i, c in enumerate(node.get('connectors', []))})
@@ -276,14 +309,28 @@ def check_mind_map(text, schema):
     return problems
 
 
+def check_mind_map_zip(path, schema):
+    """Check a mind map .zip file: its YAML, as check_mind_map does, and that its images are in the zip."""
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist() if not n.endswith('/')]
+        yamls = [n for n in names if n.lower().endswith(('.yaml', '.yml')) and not n.startswith('__MACOSX/')]
+        if not yamls:
+            return ['the zip has no .yaml file']
+        folder = yamls[0].rpartition('/')[0]
+        prefix = folder + '/' if folder else ''
+        beside = {n[len(prefix):] for n in names if n.startswith(prefix)}
+        return check_mind_map(z.read(yamls[0]).decode('utf-8'), schema, beside)
+
+
 # Example:
 # schema = json.load(open('mindmap-schema.json'))
+# check_mind_map_zip('holiday_in_the_netherlands.zip', schema)
 # check_mind_map(open('holiday_in_the_netherlands.yaml').read(), schema)
 ```
 
 ## A complete example
 
-This map uses every feature. Its keys follow the editor's rule, so opening and saving it in the editor gives back the same data.
+This map uses every feature. Its keys follow the editor's rule, so opening and saving it in the editor gives back the same data. Saved as a zip, it would also hold `images/harwich_ferry.jpg`; opened as plain YAML, that image shows as a placeholder.
 
 ```yaml
 root:
@@ -304,6 +351,7 @@ root:
       children:
         harwich_ferry:
           title: Harwich ferry
+          image: images/harwich_ferry.jpg
           link: https://www.stenaline.co.uk
           connectors:
             - to: root/places/utrecht
@@ -353,12 +401,13 @@ The root has four children, so Travel and Budget are drawn on the right and Plac
 ## Checklist for generating a map
 
 1. One top-level key, `root`, with a string `title`.
-2. Every node has a `title`; only `title`, `icons`, `note`, `link`, `connectors` and `children` appear.
+2. Every node has a `title`; only `title`, `icons`, `image`, `note`, `link`, `connectors` and `children` appear.
 3. `children` is a mapping with unique keys made of `a-z`, `A-Z`, `0-9` and `_`, ideally made from titles by the rule above.
 4. Titles that look like numbers, booleans, dates or null, or that contain special characters, are quoted.
 5. Notes are block scalars (`|`); LaTeX never appears in double quotes.
 6. Every connector's `to` is `root` or `root/…/…` naming an existing node other than its own.
 7. Icon names come from the table, spelled exactly.
 8. Links are absolute `https://` URLs.
-9. Empty fields are left out.
-10. `check_mind_map` returns an empty list.
+9. Each `image` is a relative `.png` or `.jpg` path, and that file is put in the zip beside the YAML.
+10. Empty fields are left out.
+11. `check_mind_map_zip` (or `check_mind_map` for YAML on its own) returns an empty list.

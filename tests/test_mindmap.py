@@ -691,3 +691,201 @@ def test_the_doc_lists_exactly_the_icons_the_editor_knows(mm):
     section = FORMAT_DOC.split('## Icons')[1].split('\n## ')[0]
     listed = re.findall(r'`([^`]+)` \(', section)
     assert listed == known
+
+
+# Images: one PNG or JPEG per node, shown under the title, kept in the saved zip and in IndexedDB.
+
+def make_image(path, size=(300, 150), fmt=None, colour=(40, 120, 200)):
+    from PIL import Image
+    Image.new('RGB', size, colour).save(path, fmt)
+    return path
+
+
+def image_size(data):
+    import io
+    from PIL import Image
+    with Image.open(io.BytesIO(data)) as im:
+        return im.size, im.format
+
+
+def attach_image(mm, title, path):
+    mm.node(title).click()
+    with mm.page.expect_file_chooser() as fc:
+        mm.menu('Image', '#bAttach')
+    fc.value.set_files(str(path))
+    mm.page.wait_for_function('!document.querySelector("#imageIn").dataset.busy')
+
+
+def shown_image(mm, title):
+    img = mm.node(title).locator('.pic img')
+    img.wait_for()
+    mm.page.wait_for_function('i => i.complete && i.naturalWidth > 0', arg=img.element_handle())
+    return img
+
+
+def zip_files(path):
+    with zipfile.ZipFile(path) as z:
+        return {n: z.read(n) for n in z.namelist()}
+
+
+def stored_images(mm):
+    return mm.page.evaluate('''() => new Promise(ok => {
+        const r = indexedDB.open('mindmap-editor-images');
+        r.onsuccess = () => { const db = r.result;
+          if (!db.objectStoreNames.contains('images')) { db.close(); return ok([]); }
+          const q = db.transaction('images').objectStore('images').getAllKeys();
+          q.onsuccess = () => { db.close(); ok(q.result); }; };
+      })''')
+
+
+def test_an_attached_image_is_shown_under_the_title(mm, tmp_path):
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'wide.png', (300, 150)))
+    img = shown_image(mm, 'CRUDulator')
+    box, title = img.bounding_box(), mm.node('CRUDulator').locator('.t').bounding_box()
+    assert (round(box['width']), round(box['height'])) == (200, 100)     # fitted into 200 x 200, shape kept
+    assert box['y'] >= title['y'] + title['height'] - 1
+
+
+def test_a_small_image_is_shown_at_its_own_size(mm, tmp_path):
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'small.png', (80, 40)))
+    box = shown_image(mm, 'CRUDulator').bounding_box()
+    assert (round(box['width']), round(box['height'])) == (80, 40)
+
+
+def test_the_image_menu_attaches_replaces_and_removes_with_undo(mm, tmp_path):
+    mm.node('CRUDulator').click()
+    mm.menu('Image')
+    assert mm.page.is_disabled('#bRemoveImage')
+    mm.page.keyboard.press('Escape')
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'a.png', colour=(255, 0, 0)))
+    first = shown_image(mm, 'CRUDulator').get_attribute('src')
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'b.png', colour=(0, 255, 0)))
+    assert shown_image(mm, 'CRUDulator').get_attribute('src') != first
+    assert mm.page.locator('.pic').count() == 1
+    mm.page.keyboard.press('Control+z')
+    assert shown_image(mm, 'CRUDulator').get_attribute('src') == first
+    mm.menu('Image', '#bRemoveImage')
+    assert mm.node('CRUDulator').locator('.pic').count() == 0
+    mm.page.keyboard.press('Control+z')
+    assert shown_image(mm, 'CRUDulator').get_attribute('src') == first
+
+
+def test_images_are_saved_in_the_zip_and_opened_again(mm, tmp_path):
+    png = make_image(tmp_path / 'Ferry photo.png', (120, 90))
+    attach_image(mm, 'CRUDulator', png)
+    saved = mm.save(tmp_path / 'out')
+    files = zip_files(saved)
+    _, data = read_zip(saved)
+    jsonschema.validate(data, SCHEMA)
+    path = data['root']['children']['crudulator']['image']
+    assert path.startswith('images/ferry_photo') and path.endswith('.png')
+    assert files[path] == png.read_bytes()                  # small images are kept exactly as they were
+    mm.new_map()
+    mm.open(saved)
+    assert shown_image(mm, 'CRUDulator').evaluate('i => [i.naturalWidth, i.naturalHeight]') == [120, 90]
+
+
+def test_images_survive_a_reload(mm, tmp_path):
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'keep.jpg', (100, 100), 'JPEG'))
+    mm.page.reload()
+    mm.page.wait_for_selector('.node.root')
+    shown_image(mm, 'CRUDulator')
+
+
+def test_a_large_photo_is_shrunk_when_attached(mm, tmp_path):
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'big.jpg', (3000, 2000), 'JPEG'))
+    _, data = read_zip(saved := mm.save(tmp_path / 'out'))
+    path = data['root']['children']['crudulator']['image']
+    assert path.endswith('.jpg')
+    assert image_size(zip_files(saved)[path]) == ((1600, 1067), 'JPEG')
+
+
+def test_a_large_png_stays_a_png(mm, tmp_path):
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'big.png', (1000, 2400)))
+    _, data = read_zip(saved := mm.save(tmp_path / 'out'))
+    path = data['root']['children']['crudulator']['image']
+    assert image_size(zip_files(saved)[path]) == ((667, 1600), 'PNG')
+
+
+def test_other_kinds_of_image_are_refused(mm, tmp_path):
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'anim.gif', (50, 50), 'GIF'))
+    assert 'PNG and JPEG' in mm.message()
+    assert mm.page.locator('.pic').count() == 0
+
+
+def test_a_missing_image_shows_a_placeholder_and_keeps_its_reference(mm, tmp_path):
+    mm.open(write_zip(tmp_path / 'm.zip', 'root:\n  title: M\n  children:\n    a: {title: A, image: images/gone.png}\n'))
+    assert 'missing' in mm.message()
+    assert mm.node('A').locator('.pic.missing').is_visible()
+    _, data = read_zip(mm.save(tmp_path / 'out'))
+    assert data['root']['children']['a']['image'] == 'images/gone.png'
+
+
+def test_images_are_found_beside_a_yaml_file_in_a_folder(mm, tmp_path):
+    from io import BytesIO
+    from PIL import Image
+    buf = BytesIO(); Image.new('RGB', (30, 20), (9, 9, 9)).save(buf, 'PNG')
+    path = tmp_path / 'f.zip'
+    with zipfile.ZipFile(path, 'w') as z:
+        z.writestr('trip/map.yaml', 'root:\n  title: T\n  children:\n    a: {title: A, image: pics/x.png}\n')
+        z.writestr('trip/pics/x.png', buf.getvalue())
+    mm.open(path)
+    shown_image(mm, 'A')
+
+
+def _put_file_in_page(mm, path, mime):
+    import base64
+    return mm.page.evaluate_handle('''([b64, name, type]) => {
+        const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        const dt = new DataTransfer(); dt.items.add(new File([bytes], name, { type })); return dt; }''',
+        [base64.b64encode(path.read_bytes()).decode(), path.name, mime])
+
+
+def test_an_image_dropped_on_a_node_is_attached_to_it(mm, tmp_path):
+    dt = _put_file_in_page(mm, make_image(tmp_path / 'drop.png', (60, 60)), 'image/png')
+    mm.node('SQLite browser').dispatch_event('drop', {'dataTransfer': dt})
+    shown_image(mm, 'SQLite browser')
+    assert mm.page.locator('.node.sel .t').inner_text() == 'SQLite browser'
+
+
+def test_a_pasted_image_is_attached_to_the_selected_node(mm, tmp_path):
+    dt = _put_file_in_page(mm, make_image(tmp_path / 'paste.png', (60, 60)), 'image/png')
+    mm.node('Mind map editor').click()
+    mm.page.evaluate('dt => document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }))', dt)
+    shown_image(mm, 'Mind map editor')
+
+
+def test_images_no_longer_used_are_cleared_from_the_browser_on_reload(mm, tmp_path):
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'old.png'))
+    assert len(stored_images(mm)) == 1
+    mm.new_map()
+    mm.page.reload()
+    mm.page.wait_for_selector('.node.root')
+    mm.page.wait_for_function('window.imagesReady')
+    assert stored_images(mm) == []
+
+
+def test_the_doc_zip_checker_finds_missing_images(mm, tmp_path):
+    space = {}
+    exec(doc_blocks('python')[0][0], space)
+    check_zip = lambda p: space['check_mind_map_zip'](p, SCHEMA)
+    attach_image(mm, 'CRUDulator', make_image(tmp_path / 'ok.png', (40, 40)))
+    saved = mm.save(tmp_path / 'out')
+    assert check_zip(saved) == []
+    gone = write_zip(tmp_path / 'gone.zip', 'root:\n  title: G\n  children:\n    a: {title: A, image: images/gone.png}\n')
+    assert 'not in the zip' in check_zip(gone)[0]
+    assert space['check_mind_map']('root:\n  title: A\n  image: ../x.png\n', SCHEMA)          # outside the zip
+    assert space['check_mind_map']('root:\n  title: A\n  image: x.gif\n', SCHEMA)             # not PNG or JPEG
+
+
+def test_an_image_path_outside_the_zip_is_refused(mm, tmp_path):
+    before = mm.titles()
+    mm.open(write_zip(tmp_path / 'bad.zip', 'root:\n  title: B\n  children:\n    a: {title: A, image: ../secret.png}\n'))
+    assert 'not the path of a file in the zip' in mm.message()
+    assert mm.titles() == before
+
+
+def test_help_explains_images(mm):
+    mm.page.click('#bHelp')
+    section = mm.page.locator('#dlg section', has=mm.page.locator('h3', has_text='Images'))
+    assert 'Attach image' in section.inner_text()

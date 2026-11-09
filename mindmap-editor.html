@@ -88,6 +88,12 @@ main{flex:1;display:flex;min-height:0}
   padding:2px 5px 2px;border-bottom:2px solid var(--c);border-radius:3px 3px 0 0;cursor:pointer;user-select:none;
   display:flex;align-items:flex-start;gap:4px}
 .node .t{outline:none;min-width:1ch}
+/* A node with an image: its title row, then the picture underneath */
+.node.has-pic{flex-direction:column}
+.node .row{display:flex;align-items:flex-start;gap:4px;max-width:100%}
+.pic{display:block;line-height:0;padding:2px 0 3px}
+.pic img{display:block;border-radius:3px;max-width:none}
+.pic.missing{line-height:1.3;font-size:12px;color:var(--muted);border:1.5px dashed var(--line);border-radius:4px;padding:10px 12px;margin:2px 0 3px}
 .node.d2{border-bottom-width:1.5px}
 .node.d3{border-bottom-width:1px;font-size:13px}
 .node.root{border:2px solid var(--fg);border-radius:12px;padding:8px 14px;font-size:17px;font-weight:600;background:var(--canvas)}
@@ -199,6 +205,13 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <button id="iClear">Remove all icons</button>
       </div>
     </div>
+    <div class="menu">
+      <button class="mb" id="mbImage" aria-haspopup="true" aria-expanded="false" aria-controls="mImage">Image</button>
+      <div class="pop" id="mImage" hidden>
+        <button id="bAttach">Attach image…</button>
+        <button id="bRemoveImage">Remove image</button>
+      </div>
+    </div>
     <button class="mb" id="bHelp" title="Help (?)">Help</button>
   </nav>
   <span class="sep"></span>
@@ -221,6 +234,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
 </header>
 
 <input id="fileIn" type="file" accept=".zip,.yaml,.yml" hidden>
+<input id="imageIn" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
 <div id="toast" role="status" hidden></div>
 
 <main>
@@ -253,6 +267,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <dl class="keys">
         <dt>File</dt><dd>New map, Open and Save.</dd>
         <dt>Icons</dt><dd>Choose an icon to add it to the selected node, before its title. Choose it again to take it off. <b>Remove all icons</b> clears the node's icons.</dd>
+        <dt>Image</dt><dd>Attach an image to the selected node, or remove it.</dd>
         <dt>Toolbar</dt><dd>Buttons for the editing commands that also have keys, for use on a phone or tablet.</dd>
       </dl>
     </section>
@@ -306,6 +321,12 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <p>Notes use Markdown: <code>**bold**</code>, <code>*italic*</code>, <code>- </code> or <code>1. </code> for lists, <code>#</code> for a heading, <code>`code`</code> and <code>[text](https://…)</code> for a link. When you leave the note it is shown formatted; click or tap it to edit it again. Links in a note open in a new tab.</p>
     </section>
     <section>
+      <h3>Images</h3>
+      <p>A node can have one PNG or JPEG image, shown under its title. Select the node and choose <b>Attach image…</b> from the <b>Image</b> menu; on a phone or tablet this offers your photos and camera. You can also drop an image file onto a node, or paste one to put it on the selected node. Attaching another image replaces the first; <b>Remove image</b> takes it off. Both can be undone.</p>
+      <p>Large photos are shrunk to 1600 pixels on their longer side when attached. On the map, images are scaled to fit within 200 × 200 pixels.</p>
+      <p>Images are saved in the <code>.zip</code> file, in an <code>images</code> folder beside the YAML file, and are kept in this browser between visits. A plain <code>.yaml</code> file can't hold images, so a node whose image isn't in the file shows <b>Image missing</b>.</p>
+    </section>
+    <section>
       <h3>Maths in notes</h3>
       <p>Write formulas in LaTeX. Put <code>$…$</code> round a formula within a line, and <code>$$…$$</code> round one that should stand on its own. Type <code>\$</code> for a dollar sign that isn't maths; a price such as <code>$5</code> is usually left alone anyway.</p>
       <dl class="keys tex">
@@ -357,7 +378,7 @@ const ICON_GROUPS = [
 const ICONS = new Map(ICON_GROUPS.flatMap(([, list]) => list.map(([name, glyph, label]) => [name, { glyph, label }])));
 
 let uid = 0;
-const mk = (title, note = '', children = []) => ({ id: ++uid, title, note, link: '', icons: [], connectors: [], children, folded: false, side: null });
+const mk = (title, note = '', children = []) => ({ id: ++uid, title, note, link: '', image: '', icons: [], connectors: [], children, folded: false, side: null });
 const iconsOf = n => n.icons || (n.icons = []);
 
 let root, sel, undoStack = [], redoStack = [], parents = new Map(), boxes = new Map();
@@ -451,10 +472,14 @@ function render() {
   const els = new Map();
 
   (function build(n, depth, color, side) {
-    const el = document.createElement('div');
-    el.className = 'node' + (n === root ? ' root' : ` d${Math.min(depth, 3)} ${side === 'left' ? 'l' : 'r'}`) + (n === sel ? ' sel' : '');
-    el.dataset.id = n.id;
-    if (color != null) el.style.setProperty('--c', `var(--b${color})`);
+    const node = document.createElement('div');
+    node.className = 'node' + (n === root ? ' root' : ` d${Math.min(depth, 3)} ${side === 'left' ? 'l' : 'r'}`) + (n === sel ? ' sel' : '');
+    const pic = picFor(n);
+    // With a picture, the icons, title and markers go in a row above it; otherwise straight into the node.
+    const el = pic ? document.createElement('div') : node;
+    if (pic) { el.className = 'row'; node.classList.add('has-pic'); node.append(el, pic); }
+    node.dataset.id = n.id;
+    if (color != null) node.style.setProperty('--c', `var(--b${color})`);
     for (const name of iconsOf(n)) {
       const ic = document.createElement('span'), known = ICONS.get(name);
       ic.className = 'ic'; ic.dataset.icon = name;
@@ -464,7 +489,7 @@ function render() {
     const t = document.createElement('span'); t.className = 't'; t.textContent = n.title; el.append(t);
     if (n.note && n.note.trim()) {
       el.insertAdjacentHTML('beforeend', '<svg class="ni" width="11" height="13" viewBox="0 0 11 13" aria-label="has note"><path d="M1 .5h6.5L10.5 3.5v9H1z" fill="none" stroke="currentColor"/><path d="M3 6h5M3 8.5h5" stroke="currentColor"/></svg>');
-      el.title = n.note;
+      node.title = n.note;
     }
     if (n.link) {
       const a = document.createElement('a');
@@ -474,9 +499,9 @@ function render() {
       el.append(a);
     }
     if (n.folded && n.children.length) {
-      const f = document.createElement('span'); f.className = 'fold'; f.textContent = countAll(n); el.append(f);
+      const f = document.createElement('span'); f.className = 'fold'; f.textContent = countAll(n); node.append(f);
     }
-    stage.append(el); els.set(n.id, el);
+    stage.append(node); els.set(n.id, node);
     if (!n.folded || n === root) n.children.forEach((c, i) =>
       build(c, depth + 1, n === root ? i % BRANCH_COLORS : color, n === root ? (c.side || 'right') : side));
   })(root, 0, null, null);
@@ -632,6 +657,7 @@ function showSelection() {
   $('#iFor').replaceChildren('Icons for ', Object.assign(document.createElement('b'), { textContent: sel.title }));
   for (const b of $('#iconGrid').querySelectorAll('button')) b.setAttribute('aria-pressed', on.includes(b.dataset.icon));
   $('#iClear').disabled = !on.length;
+  $('#bRemoveImage').disabled = !sel.image;
 }
 function select(n) {
   if (!n) return;
@@ -808,6 +834,7 @@ function toObj(n, kp) {
   if (iconsOf(n).length) o.icons = [...n.icons];
   if (n.note && n.note.trim()) o.note = n.note;
   if (n.link) o.link = n.link;
+  if (n.image) o.image = n.image;
   const cs = conns(n).filter(c => kp.paths.has(c.to));
   if (cs.length) o.connectors = cs.map(c => c.label ? { to: kp.paths.get(c.to), label: c.label } : { to: kp.paths.get(c.to) });
   if (n.children.length) {
@@ -828,9 +855,11 @@ function fromYaml(text) {
     if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(`In this file, ${path} is not a node.`);
     if (typeof o.title !== 'string') throw new Error(`In this file, ${path} has no title.`);
     if (o.link != null && typeof o.link !== 'string') throw new Error(`In this file, the link on ${path} is not text.`);
+    if (o.image != null && (typeof o.image !== 'string' || !/^(?!\/)(?!.*(^|\/)\.\.(\/|$))[^\\]+$/.test(o.image)))
+      throw new Error(`In this file, the image on ${path} is not the path of a file in the zip.`);
     if (o.icons != null && !(Array.isArray(o.icons) && o.icons.every(i => typeof i === 'string')))
       throw new Error(`In this file, the icons on ${path} are not a list of icon names.`);
-    const n = { id: ++next, title: o.title, note: typeof o.note === 'string' ? o.note : '', link: o.link || '',
+    const n = { id: ++next, title: o.title, note: typeof o.note === 'string' ? o.note : '', link: o.link || '', image: o.image || '',
                 icons: o.icons ? [...o.icons] : [], connectors: [], children: [], folded: false, side: null };
     byPath.set(path, n);
     if (o.connectors != null) {
@@ -892,28 +921,151 @@ async function saveMap() {
   const name = slug(root.title) || 'mindmap';
   const zip = new JSZip();
   zip.file(name + '.yaml', toYaml());
+  const paths = new Set(allNodes().map(n => n.image).filter(Boolean));
+  let missing = 0;
+  for (const p of paths) imgs.has(p) ? zip.file(p, imgs.get(p).blob, { compression: 'STORE' }) : missing++;
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  if (await saveFile(name + '.zip', blob)) toast(`Saved ${name}.zip.`);
+  if (await saveFile(name + '.zip', blob))
+    toast(`Saved ${name}.zip.` + (missing ? ` ${plural(missing, 'image')} missing from the map ${missing === 1 ? 'was' : 'were'} not included.` : ''));
 }
 async function openFile(file) {
   if (!libsReady()) return;
   try {
-    let text;
+    let text, zip = null, base = '';
     if (/\.ya?ml$/i.test(file.name)) text = await file.text();
     else {
-      let zip;
       try { zip = await JSZip.loadAsync(file); }
       catch (e) { throw new Error(`${file.name} is not a .zip or .yaml file.`); }
       const entry = Object.values(zip.files).find(f => !f.dir && /\.ya?ml$/i.test(f.name) && !f.name.startsWith('__MACOSX/'));
       if (!entry) throw new Error(`${file.name} has no .yaml file in it.`);
       text = await entry.async('string');
+      base = entry.name.replace(/[^/]*$/, '');              // images are found relative to the YAML file
     }
     const r = fromYaml(text);
+    let missing = 0;
+    for (const p of new Set(allNodes(r).map(n => n.image).filter(Boolean))) {
+      const f = zip && zip.file(base + p);
+      if (f) {
+        try { await addImage(p, new Blob([await f.async('arraybuffer')], { type: /\.png$/i.test(p) ? 'image/png' : 'image/jpeg' }), true); }
+        catch (e) { missing++; }
+      } else if (!imgs.has(p)) missing++;
+    }
     snapshot();
     root = r; uid = maxId(root); sel = root; selConn = null; boxes = new Map();
     changed();
-    toast(`Opened ${file.name}: ${countAll(root) + 1} nodes.`);
+    toast(`Opened ${file.name}: ${countAll(root) + 1} nodes.` + (missing ? ` ${plural(missing, 'image')} ${missing === 1 ? 'is' : 'are'} missing from the file.` : ''));
   } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- images ---------- */
+// One PNG or JPEG per node. The map refers to it by a path such as "images/ferry_3fa2c1d0.jpg" (the name, then part
+// of a hash of the bytes). The bytes are kept in memory, in IndexedDB between visits, and in the zip when saved.
+// Nothing is removed during a visit, so undo always finds its image; images the map no longer uses are cleared at start-up.
+const IMG_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg' }, IMG_MAX = 1600, IMG_SHOW = 200;
+const imgs = new Map();                  // path -> { blob, url, w, h }
+var imagesReady = false;                 // true once stored images have been loaded at start-up
+const plural = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+
+function picFor(n) {
+  if (!n.image) return null;
+  const im = imgs.get(n.image), pic = document.createElement('div');
+  pic.className = 'pic';
+  if (im) {
+    const k = Math.min(1, IMG_SHOW / Math.max(im.w, im.h));     // fit within 200 x 200, never enlarged
+    const img = new Image();
+    img.src = im.url; img.alt = ''; img.draggable = false;
+    img.width = Math.round(im.w * k); img.height = Math.round(im.h * k);
+    pic.append(img);
+  } else if (imagesReady) {
+    pic.classList.add('missing'); pic.textContent = 'Image missing'; pic.title = n.image;
+  } else return null;                                         // still loading at start-up
+  return pic;
+}
+function imageDb() {
+  return new Promise((ok, fail) => {
+    const r = indexedDB.open('mindmap-editor-images', 2);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('images')) r.result.createObjectStore('images'); };
+    r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error);
+  });
+}
+async function imageStore(mode, work) {
+  const db = await imageDb();
+  try {
+    return await new Promise((ok, fail) => {
+      const tx = db.transaction('images', mode), req = work(tx.objectStore('images'));
+      tx.oncomplete = () => ok(req && req.result); tx.onerror = tx.onabort = () => fail(tx.error);
+    });
+  } finally { db.close(); }
+}
+// Registers an image's bytes under a path (replacing any it had, when replace is set) and keeps them for next time.
+async function addImage(path, blob, replace = false, keep = true) {
+  if (!imgs.has(path) || replace) {
+    const bmp = await createImageBitmap(blob);                // fails if the bytes aren't an image
+    const old = imgs.get(path);
+    imgs.set(path, { blob, url: URL.createObjectURL(blob), w: bmp.width, h: bmp.height });
+    bmp.close();
+    if (old) URL.revokeObjectURL(old.url);
+  }
+  if (keep) try { await imageStore('readwrite', st => st.put(blob, path)); } catch (e) {}   // IndexedDB may be unavailable
+}
+async function shortHash(blob) {
+  try { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join(''); }
+  catch (e) { return Math.random().toString(16).slice(2, 10); }
+}
+const isImageFile = f => /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|heic|heif|bmp|svg|avif)$/i.test(f.name);
+// Checks the file is a PNG or JPEG and shrinks a large one to 1600 pixels on its longer side.
+async function prepareImage(file) {
+  const byName = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' }[(file.name.match(/\.([a-z]+)$/i) || [])[1]?.toLowerCase()];
+  // Some systems give no type, or an old one such as image/pjpeg; then the extension decides.
+  const type = IMG_TYPES[file.type] ? file.type : byName && (!file.type || /^image\/(x-png|pjpeg|jpg)$/.test(file.type)) ? byName : '';
+  if (!type) {
+    const kind = (file.type.split('/')[1] || (file.name.match(/\.([a-z0-9]+)$/i) || [])[1] || '').toUpperCase();
+    throw new Error(`Only PNG and JPEG images can be attached${kind ? `, and ${file.name} is a ${kind} file` : ''}.`);
+  }
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch (e) { throw new Error(`${file.name} could not be read as an image.`); }
+  let blob = file;
+  const k = IMG_MAX / Math.max(bmp.width, bmp.height);
+  if (k < 1) {
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    blob = await new Promise(ok => c.toBlob(ok, type, 0.85));
+  }
+  bmp.close();
+  const name = slug(file.name.replace(/\.[^.]*$/, '')) || 'image';
+  return { path: `images/${name}_${await shortHash(blob)}.${IMG_TYPES[type]}`, blob };
+}
+async function attachImage(file, node = sel) {
+  const inp = $('#imageIn');
+  inp.dataset.busy = '1';                                    // lets tests wait for the work to finish
+  try {
+    const { path, blob } = await prepareImage(file);
+    await addImage(path, blob);
+    snapshot();
+    node.image = path; sel = node; selConn = null;
+    changed();
+  } catch (e) { toast(e.message, true); }
+  finally { delete inp.dataset.busy; }
+}
+function removeImage() {
+  if (!sel.image) return;
+  snapshot(); sel.image = ''; changed();
+}
+// At start-up: load the images the map uses, and clear out the ones it doesn't.
+async function loadStoredImages() {
+  const used = new Set(allNodes().map(n => n.image).filter(Boolean));
+  try {
+    const keys = await imageStore('readonly', st => st.getAllKeys());
+    for (const k of keys) {
+      if (!used.has(k)) await imageStore('readwrite', st => st.delete(k));
+      else if (!imgs.has(k)) {
+        const blob = await imageStore('readonly', st => st.get(k));
+        if (blob) try { await addImage(k, blob, false, false); } catch (e) {}
+      }
+    }
+  } catch (e) {}
+  imagesReady = true;
 }
 
 /* ---------- help ---------- */
@@ -976,12 +1128,26 @@ $('#bHelp').onclick = () => { closeMenu(); openHelp(); };
 $('#bSave').onclick = fileCmd(saveMap);
 $('#bOpen').onclick = fileCmd(() => $('#fileIn').click());
 $('#fileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); };
+$('#bAttach').onclick = fileCmd(() => { if (selConn) select(sel); $('#imageIn').click(); });
+$('#bRemoveImage').onclick = fileCmd(removeImage);
+$('#imageIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) attachImage(f); };
+// A pasted image goes on the selected node, unless a text box has the focus.
+document.addEventListener('paste', e => {
+  if (editing || !$('#dlg').hidden) return;
+  const a = document.activeElement;
+  if (a && a.matches('input, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+  const f = [...(e.clipboardData ? e.clipboardData.files : [])].find(isImageFile);
+  if (f) { e.preventDefault(); attachImage(f); }
+});
 const mainEl = document.querySelector('main');
 mainEl.addEventListener('dragover', e => { e.preventDefault(); mainEl.classList.add('drop'); });
 mainEl.addEventListener('dragleave', () => mainEl.classList.remove('drop'));
 mainEl.addEventListener('drop', e => {
   e.preventDefault(); mainEl.classList.remove('drop');
-  const f = e.dataTransfer.files[0]; if (f) openFile(f);
+  const f = e.dataTransfer.files[0]; if (!f) return;
+  if (!isImageFile(f)) return openFile(f);
+  const el = e.target.closest && e.target.closest('.node');    // an image goes on the node it's dropped on
+  attachImage(f, el ? findById(root, +el.dataset.id) : sel);
 });
 $('#bNew').onclick = () => { closeMenu(); snapshot(); uid = 0; root = mk('New mind map'); sel = root; selConn = null; cancelConnect(); boxes = new Map(); changed(); };
 $('#hClose').onclick = closeHelp;
@@ -1183,6 +1349,7 @@ if (stored) { root = stored; uid = maxId(root); } else root = sample();
 sel = root; indexParents();
 (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { boxes = new Map(); render(); vp.focus({ preventScroll: true }); });
 render();
+loadStoredImages().then(render);
 </script>
 </body>
 </html>
