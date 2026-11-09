@@ -889,3 +889,21 @@ def test_help_explains_images(mm):
     mm.page.click('#bHelp')
     section = mm.page.locator('#dlg section', has=mm.page.locator('h3', has_text='Images'))
     assert 'Attach image' in section.inner_text()
+
+
+# Fitting the screen
+
+FITS = '''() => { const r = s => document.querySelector(s).getBoundingClientRect();
+  return [r('body').height, r('#vp').bottom, r('aside').bottom].every(v => v <= innerHeight + 0.5) }'''
+
+
+def test_the_map_and_panel_fit_a_phone_turned_to_landscape(mm):
+    mm.page.set_viewport_size({'width': 390, 'height': 844})
+    mm.page.wait_for_timeout(200)
+    assert mm.page.evaluate(FITS)
+    mm.page.set_viewport_size({'width': 844, 'height': 390})
+    mm.page.wait_for_timeout(200)
+    assert mm.page.evaluate(FITS)
+    root = mm.page.locator('.node.root').bounding_box()
+    vp = mm.page.locator('#vp').bounding_box()
+    assert vp['y'] <= root['y'] and root['y'] + root['height'] <= vp['y'] + vp['height']   # the root is still in view
