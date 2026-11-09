@@ -2,3 +2,4 @@
 pytest-playwright
 pyyaml
 jsonschema
+pillow
