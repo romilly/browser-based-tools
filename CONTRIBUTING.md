@@ -55,7 +55,7 @@ The pages fetch their libraries from cdnjs. To run the tests without internet ac
 
 ## Recording the demo video
 
-`demos/mindmap_demo.py` records a captioned demo of the Mind Map Editor as an mp4, about a minute and a half long. It needs Playwright with Chromium (as for the tests) and `ffmpeg`.
+`demos/mindmap_demo.py` records a captioned demo of the Mind Map Editor as an mp4, a little under two minutes long. It needs Playwright with Chromium (as for the tests) and `ffmpeg`.
 
 In Jupyter, from the `demos` folder:
 
@@ -65,5 +65,7 @@ await record_mindmap_demo('mindmap-demo.mp4')
 ```
 
 It records the published page by default; pass `url='file:///…/mindmap-editor.html'` to record your local copy.
+
+The picture attached in the demo is `demos/harwich_ferry.png`; pass `image=` to use another PNG or JPEG.
 
 Videos are stored with Git LFS (see `.gitattributes`). GitHub Pages doesn't serve LFS files, so link to a video on github.com rather than on the published site.

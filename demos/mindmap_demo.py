@@ -1,7 +1,8 @@
 """Record a demo video of the Mind Map Editor as an mp4.
 
-The demo starts a new map, adds and edits branches, adds a note, connects two
-branches and saves the map. Captions describe each step, and a drawn pointer
+The demo starts a new map, adds and edits branches, writes a Markdown note,
+attaches a picture, writes a note with a formula, adds icons, connects two
+branches, saves the map and opens Help. Captions describe each step, and a drawn pointer
 shows where the clicks go (a headless browser has no visible mouse).
 
 In Jupyter:     await record_mindmap_demo('mindmap-demo.mp4')
@@ -24,6 +25,7 @@ from playwright.async_api import async_playwright
 
 PAGES_URL = 'https://romilly.github.io/browser-based-tools/mindmap-editor.html'
 SIZE = {'width': 1280, 'height': 720}
+IMAGE = Path(__file__).with_name('harwich_ferry.png')   # the picture attached in the demo
 
 # A pointer that follows the mouse, a ring on each click, and a caption box.
 OVERLAY_JS = r"""
@@ -105,7 +107,7 @@ class Demo:
         await self.pause(0.6)
 
 
-async def run_script(demo):
+async def run_script(demo, image=IMAGE):
     """The steps shown in the video."""
     page = demo.page
     await demo.caption('Mind Map Editor: a Freeplane-style mind map in your browser', 2.5)
@@ -145,10 +147,38 @@ async def run_script(demo):
     await demo.double_click(demo.node('Where to stay'))
     await demo.type('Hotel in Utrecht', then='Enter')
 
-    await demo.caption('Add a note in the Note panel')
+    await demo.caption('Notes are Markdown, shown formatted when you leave them')
     await demo.click(demo.node('Harwich ferry'))
     await demo.click('#note')
-    await demo.type('Book a cabin for the overnight crossing.')
+    await demo.type('Book a **cabin** for the night crossing.\n\n- bikes go free\n- arrive by 21:00')
+    await demo.press('Escape')
+    await demo.pause(1.2)
+
+    await demo.caption('Attach a picture from the Image menu, or drop or paste one')
+    async with page.expect_file_chooser() as chooser:
+        await demo.click('#mbImage')
+        await demo.click('#bAttach')
+    await (await chooser.value).set_files(str(image))
+    await demo.pause(1.5)
+
+    await demo.caption('Notes can hold maths, written in LaTeX')
+    await demo.click(demo.node('Holiday in the Netherlands'))
+    await demo.press('Tab')
+    await demo.type('Budget', then='Enter')
+    await demo.click('#note')
+    await demo.type('Total for $n$ nights:\n\n$$C = n \\times (h + f)$$')
+    await demo.press('Escape')
+    await page.wait_for_selector('#noteView mjx-container', timeout=20000)
+    await demo.pause(2)
+
+    await demo.caption('Add icons from the Icons menu')
+    await demo.click(demo.node('Travel'))
+    await demo.click('#mbIcons')
+    await demo.click('#mIcons [data-icon="full-1"]')
+    await demo.press('Escape')
+    await demo.click(demo.node('Museums'))
+    await demo.click('#mbIcons')
+    await demo.click('#mIcons [data-icon="idea"]')
     await demo.press('Escape')
 
     await demo.caption('Connect two branches, with an optional label')
@@ -159,19 +189,25 @@ async def run_script(demo):
     await demo.press('Escape')
     await demo.pause(0.8)
 
-    await demo.caption('Save the map as a zipped YAML file')
+    await demo.caption('Save the map, with its pictures, as a zip file')
     async with page.expect_download():
         await demo.click('#mbFile')
         await demo.click('#bSave')
-    await demo.pause(2.5)
+    await demo.pause(2)
+
+    await demo.caption('Help, or the ? key, lists every command')
+    await demo.click('#bHelp')
+    await demo.pause(2)
+    await demo.click('#hClose')
     await demo.caption('', 0.8)
 
 
-async def record_mindmap_demo(out='mindmap-demo.mp4', url=PAGES_URL, prepare_page=None, headless=True):
+async def record_mindmap_demo(out='mindmap-demo.mp4', url=PAGES_URL, prepare_page=None, headless=True, image=IMAGE):
     """Record the demo and write it to `out` as an mp4. Returns the path.
 
     prepare_page: optional `async def f(page)` run before the page loads,
     e.g. to route requests to local files when working offline.
+    image: the PNG or JPEG attached to "Harwich ferry".
     """
     out = Path(out).resolve()
     with tempfile.TemporaryDirectory() as tmp:
@@ -190,7 +226,7 @@ async def record_mindmap_demo(out='mindmap-demo.mp4', url=PAGES_URL, prepare_pag
             await page.evaluate('document.fonts.ready')
             await page.mouse.move(640, 300)
             ready = time.monotonic() - started   # skip the blank frames before the page appears
-            await run_script(Demo(page))
+            await run_script(Demo(page), image)
             await context.close()
             webm = await page.video.path()
             await browser.close()
