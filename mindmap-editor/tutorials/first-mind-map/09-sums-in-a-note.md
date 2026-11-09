@@ -1,10 +1,12 @@
 ---
-title: "9. Do some sums in a note"
+layout: tutorial
+tutorial: Your first mind map
+title: "Do some sums in a note"
+step: 9
+steps: 11
+previous: 08-connect-two-branches.md
+next: 10-tidy-up.md
 ---
-
-[Your first mind map](index.md) · Step 9 of 11
-
-# 9. Do some sums in a note
 
 Notes can include mathematics, written in LaTeX.
 
@@ -19,10 +21,6 @@ Notes can include mathematics, written in LaTeX.
 
 3. Press Esc.
 
-![The Budget note showing "Total for n nights:" and the formula C = n × (h + f)](../images/maths.png)
+[![The Budget note showing "Total for n nights:" and the formula C = n × (h + f)](../images/maths.png)](../images/maths.png)
 
 `$…$` marks a formula inside a line, and `$$…$$` one on a line of its own. **Help** has a short guide to writing formulas. If a formula has a mistake, it is shown in red.
-
----
-
-[← Previous: Connect two branches](08-connect-two-branches.md) · [Contents](index.md) · [Next: Tidy up →](10-tidy-up.md)
