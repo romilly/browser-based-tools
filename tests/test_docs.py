@@ -97,3 +97,18 @@ def test_the_tutorial_uses_every_screenshot_the_script_makes():
 def test_the_screenshots_are_small():
     big = [p.name for p in (TUTORIAL.parent / 'images').glob('*.png') if p.stat().st_size > MAX_PICTURE_BYTES]
     assert big == []
+
+
+SERVER_HOWTO = ROOT / 'mindmap-editor' / 'how-to' / 'run-a-server.md'
+
+
+def test_the_landing_page_links_to_the_server_how_to():
+    assert '(how-to/run-a-server.md)' in (ROOT / 'mindmap-editor' / 'index.md').read_text()
+
+
+def test_the_server_how_to_names_files_that_exist_and_its_links_work():
+    text = SERVER_HOWTO.read_text()
+    for name in ['mindmap_server.py', 'start-mmserver.py']:
+        assert name in text and (ROOT / name).exists()
+    missing = [p for p in links(SERVER_HOWTO) if not p.startswith('http') and not (SERVER_HOWTO.parent / p).exists()]
+    assert missing == []
