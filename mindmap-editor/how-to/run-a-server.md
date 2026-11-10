@@ -19,41 +19,34 @@ git clone https://github.com/romilly/browser-based-tools.git
 cd browser-based-tools
 ```
 
-The server needs `mindmap_server.py` and `mindmap-editor.html` side by side, as they are in the repository.
+The server needs `mindmap_server.py` and `mindmap-editor.html` side by side, as they are in the repository. It uses only Python's standard library, so there is nothing to install: you don't need a virtual environment or `pip`. (The packages in `requirements-dev.txt` are only for running the tests.)
 
-## Try it from Jupyter
+## Run the server
 
-Start Jupyter in the repository folder and run:
-
-```python
-from mindmap_server import start_mind_map_server
-srv = start_mind_map_server('~/mindmaps')
-```
-
-Then, on any device on the network, browse to `http://<server name or address>:8765/`, for example `http://raspberrypi.local:8765/`. The **File** menu now has **Open from server…** and **Save to server**.
-
-To stop the server, run `srv.shutdown()`.
-
-`start_mind_map_server` takes these arguments:
-
-- the folder for the maps, created if it doesn't exist;
-- `port=8765`, the port to listen on;
-- `host='0.0.0.0'`, which accepts connections from the whole network. Use `'127.0.0.1'` for this computer only;
-- `editor=`, the path of `mindmap-editor.html`, if it isn't beside `mindmap_server.py`.
-
-## Run it as a program
-
-The server runs in the background, so a script that only starts it would end at once. [`start-mmserver.py`](../../start-mmserver.py) starts it and then waits:
+In the repository folder, run [`start-mmserver.py`](../../start-mmserver.py):
 
 ```
 python3 start-mmserver.py
 ```
 
-Press Ctrl+C to stop it. To use another folder or port, edit the `start_mind_map_server(...)` line in that file.
+It prints `Serving on port 8765; Ctrl+C to stop` and keeps running until you press Ctrl+C.
 
-## Run it as a service
+Then, on any device on the network, browse to `http://<server name or address>:8765/`, for example `http://raspberrypi.local:8765/`. The **File** menu now has **Open from server…** and **Save to server**.
 
-On Linux, systemd can start the server when the computer boots and restart it if it fails. These steps use the user `pi` and a clone at `/home/pi/browser-based-tools`; change both to suit.
+### Changing the folder or port
+
+The maps are kept in `~/mindmaps`, which is created if it doesn't exist. To change that, edit the `start_mind_map_server(...)` line in `start-mmserver.py`. It takes:
+
+- the folder for the maps;
+- `port=8765`, the port to listen on;
+- `host='0.0.0.0'`, which accepts connections from the whole network. Use `'127.0.0.1'` for this computer only;
+- `editor=`, the path of `mindmap-editor.html`, if it isn't beside `mindmap_server.py`.
+
+For example: `start_mind_map_server('~/maps', port=8080)`.
+
+## Run it as a service (optional)
+
+If you want the server always running, on Linux systemd can start the server when the computer boots and restart it if it fails. These steps use the user `pi` and a clone at `/home/pi/browser-based-tools`; change both to suit.
 
 1. Stop any copy you started by hand, because only one program can use the port.
 
