@@ -67,6 +67,16 @@ button.mb[aria-expanded="true"]{background:var(--sel);border-color:var(--line)}
   border-radius:7px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:190px}
 .pop > button{border-color:transparent;background:transparent;text-align:left;display:flex;justify-content:space-between;gap:20px;padding:7px 10px}
 .pop > button:hover:not(:disabled){background:var(--sel)}
+.pop > button[hidden]{display:none}
+#serverMaps{border:1px solid var(--line);border-radius:8px;background:var(--canvas);color:var(--fg);padding:16px 18px;
+  width:min(420px,calc(100vw - 32px));box-sizing:border-box;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+#serverMaps::backdrop{background:color-mix(in srgb,var(--bg) 70%,transparent)}
+#serverMaps h2{margin:0 0 10px;font-size:16px}
+#serverList{display:flex;flex-direction:column;gap:4px;max-height:60vh;overflow:auto}
+#serverList button{display:flex;justify-content:space-between;align-items:baseline;gap:12px;text-align:left;padding:8px 10px}
+#serverList small{color:var(--muted);white-space:nowrap}
+#serverList p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted)}
+#serverMaps form{display:flex;justify-content:flex-end;margin-top:12px}
 #mIcons{width:min(360px,calc(100vw - 24px));box-sizing:border-box;max-height:min(calc(100vh - 110px),640px)}
 #iconGrid{flex:1;min-height:0;overflow:auto}
 #iFor{font-size:12.5px;color:var(--muted);padding:2px 4px 4px;overflow-wrap:anywhere}
@@ -196,6 +206,8 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <button id="bOpen">Open…<kbd>Ctrl+O</kbd></button>
         <button id="bSave">Save<kbd>Ctrl+S</kbd></button>
         <button id="bExportMd">Export as Markdown</button>
+        <button id="bServerOpen" hidden>Open from server…</button>
+        <button id="bServerSave" hidden>Save to server</button>
       </div>
     </div>
     <div class="menu">
@@ -235,6 +247,11 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
 </header>
 
 <input id="fileIn" type="file" accept=".zip,.yaml,.yml" hidden>
+<dialog id="serverMaps" aria-labelledby="serverMapsTitle">
+  <h2 id="serverMapsTitle">Open from server</h2>
+  <div id="serverList"></div>
+  <form method="dialog"><button>Cancel</button></form>
+</dialog>
 <input id="imageIn" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
 <div id="toast" role="status" hidden></div>
 
@@ -350,6 +367,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <p><b>Save</b> (in the File menu) downloads the map as a <code>.zip</code> file holding one YAML file. <b>Open</b> reads one of those, or a plain <code>.yaml</code> file, and replaces the current map; you can also drop a file onto the map. Undo brings back the map you replaced, until you reload the page.</p>
       <p><b>Export as Markdown</b> (also in the File menu) downloads the map as a <code>.zip</code> file of linked Markdown pages, one per branch, in folders arranged like the map, with the images. Each page has the branch's icons, title, picture, web link and note, then links to the branches under it and to its connectors' targets, and at the bottom to the previous and next branch and back up to its parent. Notes and maths are copied as they are, so they show on GitHub or in Obsidian. The editor can't open an export again: use Save for that.</p>
       <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
+      <p><b>Open from server</b> and <b>Save to server</b> appear in the File menu when the editor comes from a mind map server on your own network. The server keeps maps in one folder, so all your devices share them. If a map has changed on another device since you opened it here, Save to server asks before replacing it.</p>
       <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
     </section>
     <section>
@@ -921,18 +939,22 @@ async function saveFile(name, blob) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   return true;
 }
-async function saveMap() {
-  if (!libsReady()) return;
-  if (editing) finishEdit(true);
+// The map as a zip: its YAML and the images it uses. missing counts images the map names but doesn't have.
+async function mapZip() {
   const name = slug(root.title) || 'mindmap';
   const zip = new JSZip();
   zip.file(name + '.yaml', toYaml());
   const paths = new Set(allNodes().map(n => n.image).filter(Boolean));
   let missing = 0;
   for (const p of paths) imgs.has(p) ? zip.file(p, imgs.get(p).blob, { compression: 'STORE' }) : missing++;
-  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  if (await saveFile(name + '.zip', blob))
-    toast(`Saved ${name}.zip.` + (missing ? ` ${plural(missing, 'image')} missing from the map ${missing === 1 ? 'was' : 'were'} not included.` : ''));
+  return { name, missing, blob: await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }) };
+}
+const missingNote = missing => missing ? ` ${plural(missing, 'image')} missing from the map ${missing === 1 ? 'was' : 'were'} not included.` : '';
+async function saveMap() {
+  if (!libsReady()) return;
+  if (editing) finishEdit(true);
+  const { name, missing, blob } = await mapZip();
+  if (await saveFile(name + '.zip', blob)) toast(`Saved ${name}.zip.` + missingNote(missing));
 }
 /* ---------- export as linked Markdown ---------- */
 // Titles and labels are plain text, so characters Markdown (or maths) would act on are escaped.
@@ -1004,8 +1026,68 @@ async function openFile(file) {
     root = r; uid = maxId(root); sel = root; selConn = null; boxes = new Map();
     changed();
     toast(`Opened ${file.name}: ${countAll(root) + 1} nodes.` + (missing ? ` ${plural(missing, 'image')} ${missing === 1 ? 'is' : 'are'} missing from the file.` : ''));
-  } catch (e) { toast(e.message, true); }
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
 }
+
+/* ---------- optional server on the local network (mindmap_server.py) ---------- */
+// When the page comes from mindmap_server.py, the File menu also offers Open from server and Save to server.
+// The server keeps maps in one folder, so every device sees the same ones. Each save names the version it
+// replaces (its ETag), so a map changed on another device since it was opened here isn't overwritten unasked.
+const serverTags = new Map();                       // map name -> ETag of the version last opened or saved here
+fetch('api/maps', { cache: 'no-store' })
+  .then(r => r.ok && /json/.test(r.headers.get('Content-Type') || '') ? r.json() : null)
+  .then(list => { if (Array.isArray(list)) $('#bServerOpen').hidden = $('#bServerSave').hidden = false; })
+  .catch(() => {});                                 // no server: the commands stay hidden
+async function serverSave() {
+  if (!libsReady()) return;
+  if (editing) finishEdit(true);
+  const { name, missing, blob } = await mapZip(), tag = serverTags.get(name);
+  const put = headers => fetch(`api/maps/${name}.zip`, { method: 'PUT', body: blob, headers });
+  try {
+    let r = await put(tag ? { 'If-Match': tag } : { 'If-None-Match': '*' });
+    if (r.status === 409) {
+      const q = tag ? `${name} has changed on the server since you opened it here, perhaps on another device. Save anyway, replacing that version?`
+                    : `A map called ${name} is already on the server. Replace it with this one?`;
+      if (!confirm(q)) { toast(`Not saved: ${name} on the server is unchanged.`, true); return; }
+      r = await put({});
+    }
+    if (!r.ok) throw new Error(`the server answered ${r.status}.`);
+    serverTags.set(name, r.headers.get('ETag'));
+    toast(`Saved ${name} to the server.` + missingNote(missing));
+  } catch (e) { toast('Save to server failed: ' + e.message, true); }
+}
+async function serverOpen() {
+  let maps;
+  try { maps = await (await fetch('api/maps', { cache: 'no-store' })).json(); }
+  catch (e) { toast('Could not reach the server: ' + e.message, true); return; }
+  const list = $('#serverList');
+  list.replaceChildren(...maps.map(m => {
+    const b = document.createElement('button'), when = document.createElement('small');
+    b.dataset.map = m.name; b.append(m.name);
+    when.textContent = new Date(m.modified * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    b.append(when);
+    return b;
+  }));
+  if (!maps.length) {
+    const p = document.createElement('p');
+    p.textContent = 'No maps on the server yet. Save to server puts the current map there.';
+    list.append(p);
+  }
+  $('#serverMaps').showModal();
+}
+$('#serverList').onclick = async e => {
+  const b = e.target.closest('button[data-map]');
+  if (!b || !libsReady()) return;
+  $('#serverMaps').close();
+  const name = b.dataset.map;
+  try {
+    const r = await fetch(`api/maps/${name}.zip`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`the server answered ${r.status}.`);
+    if (await openFile(new File([await r.blob()], name + '.zip'))) serverTags.set(name, r.headers.get('ETag'));
+  } catch (e) { toast(`Could not open ${name}: ` + e.message, true); }
+};
+$('#serverMaps').addEventListener('close', () => vp.focus({ preventScroll: true }));
 
 /* ---------- images ---------- */
 // One PNG or JPEG per node. The map refers to it by a path such as "images/ferry_3fa2c1d0.jpg" (the name, then part
@@ -1177,6 +1259,8 @@ $('#bRedo').onclick = redo;
 $('#bHelp').onclick = () => { closeMenu(); openHelp(); };
 $('#bSave').onclick = fileCmd(saveMap);
 $('#bExportMd').onclick = fileCmd(exportMarkdown);
+$('#bServerOpen').onclick = fileCmd(serverOpen);
+$('#bServerSave').onclick = fileCmd(serverSave);
 $('#bOpen').onclick = fileCmd(() => $('#fileIn').click());
 $('#fileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); };
 $('#bAttach').onclick = fileCmd(() => { if (selConn) select(sel); $('#imageIn').click(); });
@@ -1184,7 +1268,7 @@ $('#bRemoveImage').onclick = fileCmd(removeImage);
 $('#imageIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) attachImage(f); };
 // A pasted image goes on the selected node, unless a text box has the focus.
 document.addEventListener('paste', e => {
-  if (editing || !$('#dlg').hidden) return;
+  if (editing || !$('#dlg').hidden || $('#serverMaps').open) return;
   const a = document.activeElement;
   if (a && a.matches('input, textarea, [contenteditable]:not([contenteditable="false"])')) return;
   const f = [...(e.clipboardData ? e.clipboardData.files : [])].find(isImageFile);
@@ -1343,7 +1427,7 @@ let lastTap = { id: 0, t: 0 };
 
 vp.tabIndex = 0;
 document.addEventListener('keydown', e => {
-  if (editing || !$('#dlg').hidden) return;
+  if (editing || !$('#dlg').hidden || $('#serverMaps').open) return;
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); closeMenu(); saveMap(); return; }
   if (ctrl && !e.altKey && e.key.toLowerCase() === 'o') { e.preventDefault(); closeMenu(); $('#fileIn').click(); return; }
