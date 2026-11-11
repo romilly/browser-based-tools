@@ -909,6 +909,47 @@ def test_the_map_and_panel_fit_a_phone_turned_to_landscape(mm):
     assert vp['y'] <= root['y'] and root['y'] + root['height'] <= vp['y'] + vp['height']   # the root is still in view
 
 
+EDITING = ['#bChild', '#bSib', '#bEdit', '#bFold', '#bUp', '#bDown', '#bConnect', '#bDel']
+
+
+def tops(mm, *selectors):
+    return {round(mm.page.locator(s).bounding_box()['y']) for s in selectors}
+
+
+def test_on_a_phone_the_header_takes_two_short_rows(mm):
+    mm.page.set_viewport_size({'width': 412, 'height': 915})
+    mm.page.wait_for_timeout(200)
+    assert not mm.page.locator('header h1').is_visible()
+    assert len(tops(mm, '#mbFile', '#mbIcons', '#mbImage', '#bHelp', '#bUndo', '#bRedo')) == 1   # menus, Undo, Redo
+    assert len(tops(mm, *EDITING)) == 1                                                          # editing commands
+    assert mm.page.locator('header').bounding_box()['height'] <= 90
+
+
+def test_on_a_narrow_phone_every_editing_button_can_be_reached(mm):
+    mm.page.set_viewport_size({'width': 320, 'height': 700})
+    mm.page.wait_for_timeout(200)
+    mm.new_map()
+    mm.node('New mind map').click()
+    mm.page.click('#bChild')
+    mm.page.keyboard.press('Enter')
+    assert len(mm.titles()) == 2
+    mm.page.click('#bDel')                 # scrolled into view if the row is wider than the screen
+    assert len(mm.titles()) == 1
+    assert mm.page.evaluate('document.documentElement.scrollWidth <= innerWidth')   # the page doesn't scroll sideways
+
+
+def test_on_a_phone_in_landscape_the_header_is_one_row(mm):
+    mm.page.set_viewport_size({'width': 915, 'height': 412})
+    mm.page.wait_for_timeout(200)
+    assert not mm.page.locator('header h1').is_visible()
+    assert len(tops(mm, '#mbFile', '#bChild', '#bDel', '#bRedo')) == 1
+
+
+def test_on_a_desktop_the_title_is_shown(mm):
+    mm.page.set_viewport_size({'width': 1280, 'height': 720})
+    assert mm.page.locator('header h1').is_visible()
+
+
 # Exporting as linked Markdown files
 
 TRIP = '''

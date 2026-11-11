@@ -188,8 +188,25 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     padding-left:max(16px,env(safe-area-inset-left,0px))}
   button kbd{display:none}
   header > .sep{display:none}
-  #toolbar{width:100%}
+}
+/* Phones (portrait or landscape): no title; menus with Undo/Redo on one row, editing commands on one
+   compact row that scrolls sideways if it doesn't fit, rather than wrapping */
+@media (max-width:720px), (max-height:500px){
+  header{gap:4px 6px;padding-block:4px;flex-wrap:nowrap}
+  header h1, header > .sep{display:none}
+  header button{padding:4px 7px}
+  #toolbar .edit button{padding:4px 5px;font-size:12.5px}
+  button kbd{display:none}
+  #toolbar{display:contents}
+  #toolbar .group{flex-wrap:nowrap;gap:3px}
+  #toolbar .edit{flex:none}
   #toolbar .group + .group{border-left:0;padding-left:0}
+}
+@media (max-width:720px){
+  header{flex-wrap:wrap}
+  #toolbar .history{order:1;margin-left:auto}
+  #toolbar .edit{order:2;width:100%;overflow-x:auto;scrollbar-width:none}
+  #toolbar .edit::-webkit-scrollbar{display:none}
 }
 @media (prefers-reduced-motion:no-preference){ .node{transition:background-color .12s} }
 </style>
@@ -229,7 +246,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
   </nav>
   <span class="sep"></span>
   <div id="toolbar">
-  <div class="group">
+  <div class="group edit">
     <button id="bChild" title="Add child (Tab or Insert)">Child<kbd>Tab</kbd></button>
     <button id="bSib" title="Add sibling (Enter)">Sibling<kbd>↵</kbd></button>
     <button id="bEdit" title="Edit title (F2 or double-click)">Edit<kbd>F2</kbd></button>
@@ -239,7 +256,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <button id="bConnect" title="Connect to another node (C)">Connect<kbd>C</kbd></button>
     <button id="bDel" class="danger" title="Delete branch (Delete)">Delete<kbd>Del</kbd></button>
   </div>
-  <div class="group">
+  <div class="group history">
     <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
     <button id="bRedo" title="Redo (Ctrl+Y)">Redo</button>
   </div>
