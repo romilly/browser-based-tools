@@ -54,7 +54,7 @@ diagram:
       inputs:
         save: {type: zip}
       outputs:
-        open: {type: zip, layout: {side: bottom}}
+        open: {type: zip, layout: {side: right}}
       layout: {x: 920, y: 80, w: 140, h: 60}
     server:
       type: external
@@ -92,7 +92,11 @@ diagram:
     - {from: map.map, to: build_zip.map}
     - {from: build_zip.zip, to: file.save, label: Save}
     - {from: build_zip.zip, to: server.save, label: Save to server}
-    - {from: file.open, to: read_zip.zip, label: Open}
+    - from: file.open
+      to: read_zip.zip
+      label: Open
+      layout:
+        curve: [[1200, 110], [1150, 390]]
     - {from: server.open, to: read_zip.zip, label: Open from server}
     - {from: read_zip.yaml, to: check.yaml}
     - {from: read_zip.images, to: check.images}

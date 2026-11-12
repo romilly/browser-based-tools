@@ -245,9 +245,11 @@ def test_nodes_and_ports_are_drawn_where_the_file_says(dg):
     dg.open(DATA_FLOW)
     user, edit, check = dg.box('user'), dg.box('edit'), dg.box('check')
     assert edit['width'] == pytest.approx(user['width']) and edit['y'] == pytest.approx(user['y'])
-    scale = user['width'] / 140                                      # the view may be zoomed to fit
-    assert edit['x'] - user['x'] == pytest.approx(220 * scale, abs=1)
+    scale = (edit['x'] - user['x']) / 220                            # the view may be zoomed to fit
     assert check['y'] - user['y'] == pytest.approx(200 * scale, abs=1)
+    assert check['x'] - user['x'] == pytest.approx(440 * scale, abs=1)
+    assert user['width'] == pytest.approx(140 * scale, abs=3)        # the box includes the outline
+    assert user['height'] == pytest.approx(60 * scale, abs=3)
     # ports without a layout: inputs on the left, outputs on the right
     assert dg.port_centre('edit', 'in', 'actions')[0] == pytest.approx(edit['x'], abs=2)
     assert dg.port_centre('edit', 'out', 'map')[0] == pytest.approx(edit['x'] + edit['width'], abs=2)
@@ -321,3 +323,148 @@ def test_a_bad_file_is_reported_and_the_diagram_is_kept(dg, tmp_path, text, prob
     dg.open(path)
     assert problem in dg.message()
     assert dg.nodes() == ['node'] and dg.title() == 'New diagram'
+
+
+# --- editing ---
+
+def test_dragging_a_node_moves_it_and_its_edges_follow(dg, tmp_path):
+    dg.open(DATA_FLOW)
+    before = dg.box('edit')
+    edge = dg.page.locator('#canvas path.edge[data-from="user.actions"]')
+    path_before = edge.get_attribute('d')
+    scale = (before['x'] - dg.box('user')['x']) / 220
+    x, y = before['x'] + before['width'] / 2, before['y'] + before['height'] / 2
+    dg.page.mouse.move(x, y)
+    dg.page.mouse.down()
+    dg.page.mouse.move(x + 20 * scale, y - 60 * scale, steps=5)
+    dg.page.mouse.up()
+    assert dg.box('edit')['y'] == pytest.approx(before['y'] - 60 * scale, abs=1.5)
+    assert edge.get_attribute('d') != path_before
+    nodes = dg.saved(tmp_path)['diagram']['nodes']
+    assert nodes['edit']['layout'] == {'x': 280, 'y': 100, 'w': 140, 'h': 60}
+    assert nodes['user']['layout'] == {'x': 40, 'y': 160, 'w': 140, 'h': 60}
+    dg.page.click('#bUndo')
+    assert dg.saved(tmp_path / 'undone')['diagram']['nodes']['edit']['layout']['y'] == 160
+
+
+def test_deleting_a_node_removes_its_edges_and_undo_brings_them_back(dg):
+    dg.open(DATA_FLOW)
+    dg.node('read_zip').click()
+    dg.page.keyboard.press('Delete')
+    assert 'read_zip' not in dg.nodes()
+    assert len(dg.edges()) == 8                       # two edges in and two out went with it
+    dg.page.keyboard.press('Control+z')
+    assert len(dg.nodes()) == 9 and len(dg.edges()) == 12
+    dg.page.keyboard.press('Control+y')
+    assert len(dg.nodes()) == 8
+
+
+def test_an_edge_can_be_selected_labelled_and_deleted(dg, tmp_path):
+    path = tmp_path / 'small.yaml'
+    path.write_text(SMALL)
+    dg.open(path)
+    dg.page.locator('#canvas g[data-edge="0"] .ehit').click(force=True)
+    assert dg.page.text_content('#selEdge') == 'a.out1 → b.in1'
+    dg.page.fill('#edgeLabel', 'feeds')
+    assert dg.edge_labels() == ['feeds']
+    assert dg.saved(tmp_path / 'out')['diagram']['edges'] == [{'from': 'a.out1', 'to': 'b.in1', 'label': 'feeds'}]
+    dg.page.locator('#canvas .elabel').click()
+    dg.page.click('#bDel')
+    assert dg.edges() == [] and dg.nodes() == ['a', 'b']
+
+
+def test_undo_brings_back_the_diagram_replaced_by_open(dg):
+    dg.add_node()
+    dg.open(FLOWCHART)
+    assert len(dg.nodes()) == 8
+    dg.page.click('#bUndo')
+    assert dg.nodes() == ['node'] and dg.title() == 'New diagram'
+
+
+def test_the_diagram_is_kept_when_the_page_is_reloaded(dg):
+    dg.open(DATA_FLOW)
+    dg.load()
+    assert dg.title() == 'Mind map data flow'
+    assert len(dg.nodes()) == 9 and len(dg.edges()) == 12
+
+
+def test_the_title_and_kind_are_edited_in_the_panel_and_name_the_file(dg, tmp_path):
+    dg.page.fill('#title', 'Order handling')
+    dg.page.fill('#kind', 'flowchart')
+    path = dg.save(tmp_path)
+    assert path.name == 'order_handling.yaml'
+    assert yaml.safe_load(path.read_text()) == {'diagram': {'title': 'Order handling', 'kind': 'flowchart'}}
+
+
+def test_a_double_click_edits_a_label_and_escape_cancels(dg):
+    dg.add_node()
+    dg.node('node').dblclick()
+    dg.page.keyboard.type('Two')
+    dg.page.keyboard.press('Enter')
+    assert dg.label('node') == 'Two'
+    dg.node('node').dblclick()
+    dg.page.keyboard.type('Changed my mind')
+    dg.page.keyboard.press('Escape')
+    assert dg.label('node') == 'Two'
+    dg.page.keyboard.press('F2')
+    dg.page.keyboard.press('End')
+    dg.page.keyboard.press('Shift+Enter')
+    dg.page.keyboard.type('lines')
+    dg.page.keyboard.press('Enter')
+    assert dg.node('node').locator('.label tspan').all_text_contents() == ['Two', 'lines']
+
+
+def test_the_type_chosen_in_the_panel_changes_the_shape(dg, tmp_path):
+    dg.add_node()
+    assert dg.page.text_content('#selId') == 'node'
+    assert dg.node('node').locator('.shape').evaluate('e => e.tagName') == 'rect'
+    dg.page.fill('#type', 'decision')
+    assert dg.node('node').locator('.shape').evaluate('e => e.tagName') == 'polygon'
+    assert dg.saved(tmp_path)['diagram']['nodes']['node']['type'] == 'decision'
+
+
+def test_the_toolbar_holds_only_commands_that_have_keys(dg):
+    titles = dg.page.locator('#toolbar button').evaluate_all('bs => bs.map(b => b.title)')
+    assert len(titles) == 5 and all('(' in t for t in titles)
+
+
+@pytest.mark.parametrize('width, height', [(390, 844), (844, 390), (1280, 720)], ids=['phone', 'phone on its side', 'desktop'])
+def test_everything_fits_the_screen(dg, width, height):
+    dg.page.set_viewport_size({'width': width, 'height': height})
+    dg.open(DATA_FLOW)
+    assert dg.page.evaluate('[document.documentElement.scrollWidth, document.documentElement.scrollHeight]') == [width, height]
+    view = dg.page.locator('#vp').bounding_box()
+    for node in dg.nodes():
+        b = dg.box(node)
+        assert view['x'] <= b['x'] and b['x'] + b['width'] <= view['x'] + view['width'], node
+        assert view['y'] <= b['y'] and b['y'] + b['height'] <= view['y'] + view['height'], node
+    for edge in dg.page.locator('#canvas path.edge').all():
+        b = edge.bounding_box()
+        assert view['x'] <= b['x'] and b['x'] + b['width'] <= view['x'] + view['width'], edge.get_attribute('data-from')
+    delete = dg.page.locator('#bDel').bounding_box()
+    assert delete['x'] >= 0 and delete['x'] + delete['width'] <= width
+
+
+def test_two_fingers_zoom_the_diagram(dg):
+    dg.open(DATA_FLOW)
+    before = dg.box('user')['width']
+    dg.page.evaluate("""() => {
+        const svg = document.querySelector('#canvas'), r = svg.getBoundingClientRect();
+        const send = (type, id, x, y) => svg.dispatchEvent(new PointerEvent(type,
+            { pointerId: id, pointerType: 'touch', clientX: r.left + x, clientY: r.top + y, bubbles: true, isPrimary: id === 11 }));
+        send('pointerdown', 11, 300, 300); send('pointerdown', 12, 400, 300);
+        send('pointermove', 11, 250, 300); send('pointermove', 12, 450, 300);
+        send('pointerup', 11, 250, 300); send('pointerup', 12, 450, 300);
+    }""")
+    assert dg.box('user')['width'] == pytest.approx(before * 2, rel=0.03)
+    dg.page.keyboard.press('0')                                  # show the whole diagram again
+    assert dg.box('user')['width'] == pytest.approx(before, rel=0.01)
+
+
+def test_the_phone_header_has_two_tidy_rows(dg):
+    dg.page.set_viewport_size({'width': 390, 'height': 844})
+    top = lambda s: dg.page.locator(s).bounding_box()['y']
+    assert top('#mbFile') == pytest.approx(top('#bUndo'), abs=3)
+    assert top('#bNode') == top('#bEdit') == top('#bDel') > top('#mbFile') + 10
+    assert dg.page.locator('header').bounding_box()['height'] < 80
+    assert not dg.page.locator('header h1').is_visible()

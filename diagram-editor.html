@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diagram Editor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<style>
+/* Layout: menu bar and toolbar on top; the diagram canvas fills the rest; a panel on the right (below the canvas on phones) */
+:root{
+  --bg:#f4f7f7; --canvas:#ffffff; --fg:#1d282c; --muted:#5d6e74; --line:#d6dfe1;
+  --accent:#2b6888; --sel:#d9eaf3; --panel:#eef3f4; --danger:#a5352a;
+  --node:#f1f6f8; --edge:#4f6470;
+  --ui:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121819; --canvas:#172022; --fg:#e2eaec; --muted:#93a4a9; --line:#2b383b;
+  --accent:#86bddb; --sel:#22394a; --panel:#1a2427; --danger:#ec8a7e;
+  --node:#1e2b2f; --edge:#a9bac2;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121819; --canvas:#172022; --fg:#e2eaec; --muted:#93a4a9; --line:#2b383b;
+  --accent:#86bddb; --sel:#22394a; --panel:#1a2427; --danger:#ec8a7e;
+  --node:#1e2b2f; --edge:#a9bac2;
+  color-scheme:dark}
+
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ui);display:flex;flex-direction:column;overflow:hidden}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+
+header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding-block:8px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  border-bottom:1px solid var(--line)}
+header h1{font-size:15px;font-weight:600;margin:0;margin-right:8px;letter-spacing:.01em}
+.group{display:flex;flex-wrap:wrap;gap:4px}
+.sep{width:1px;align-self:stretch;background:var(--line)}
+button{font:inherit;font-size:13px;color:var(--fg);background:var(--canvas);border:1px solid var(--line);
+  border-radius:5px;padding:5px 10px;cursor:pointer;line-height:1.2}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button:disabled{opacity:.45;cursor:default;border-color:var(--line)}
+button.danger{color:var(--danger)}
+button kbd{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
+
+#toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+#toolbar .group + .group{padding-left:12px;border-left:1px solid var(--line)}
+
+#menubar{display:flex;align-items:center;gap:2px}
+.menu{position:relative}
+button.mb{border-color:transparent;background:transparent;font-weight:500}
+button.mb:hover{border-color:var(--line)}
+button.mb[aria-expanded="true"]{background:var(--sel);border-color:var(--line)}
+.pop{position:absolute;left:0;top:calc(100% + 4px);z-index:25;background:var(--canvas);border:1px solid var(--line);
+  border-radius:7px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:190px}
+.pop > button{border-color:transparent;background:transparent;text-align:left;display:flex;justify-content:space-between;gap:20px;padding:7px 10px}
+.pop > button:hover:not(:disabled){background:var(--sel)}
+
+main{flex:1;display:flex;min-height:0}
+#vp{flex:1;position:relative;background:var(--canvas);min-width:0;min-height:0;overflow:hidden}
+#vp:focus{outline:none}
+#canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:default;user-select:none;-webkit-user-select:none}
+#canvas.panning{cursor:grabbing}
+#empty{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;color:var(--muted);font-size:14px;text-align:center;padding:24px}
+
+.node{cursor:pointer}
+.node .shape{fill:var(--node);stroke:var(--fg);stroke-width:1.4}
+.node .mark{fill:none;stroke:var(--fg);stroke-width:1.4}
+.node.sel .shape{fill:var(--sel);stroke:var(--accent);stroke-width:2.2}
+.node .label{font:14px var(--ui);fill:var(--fg);text-anchor:middle;pointer-events:none}
+.port{fill:var(--canvas);stroke:var(--fg);stroke-width:1.3}
+.port[data-dir="out"]{fill:var(--fg)}
+.edge{fill:none;stroke:var(--edge);stroke-width:1.5}
+.edge.sel{stroke:var(--accent);stroke-width:2.4}
+.ehit{fill:none;stroke:transparent;stroke-width:14;cursor:pointer}
+.arrow{fill:var(--edge)}
+.arrow.sel{fill:var(--accent)}
+.elabel,.endlabel{font:12px var(--ui);fill:var(--edge);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:4px;
+  stroke-linejoin:round;cursor:pointer}
+.elabel.sel{fill:var(--accent);font-weight:600}
+.endlabel{pointer-events:none}
+
+#edit{position:absolute;z-index:5;box-sizing:border-box;margin:0;resize:none;overflow:hidden;text-align:center;
+  font:14px/1.35 var(--ui);color:var(--fg);background:var(--canvas);border:2px solid var(--accent);border-radius:6px;padding:4px 6px}
+
+aside{width:300px;flex:none;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;
+  padding:12px 16px;padding-right:max(16px,env(safe-area-inset-right,0px));gap:8px;min-height:0;overflow:auto;box-sizing:border-box}
+aside label,aside h2{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:400;margin:0}
+aside h2{font-weight:600;margin-top:6px;padding-top:10px;border-top:1px solid var(--line)}
+aside h2:first-child{margin-top:0;padding-top:0;border-top:0}
+aside input{font:14px var(--ui);color:var(--fg);background:var(--canvas);border:1px solid var(--line);border-radius:5px;
+  padding:6px 8px;min-width:0;width:100%;box-sizing:border-box}
+aside p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+aside code{font:12.5px var(--mono);color:var(--fg)}
+.pane{display:flex;flex-direction:column;gap:8px}
+
+#dlg{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);display:grid;place-items:center;z-index:20;padding:16px}
+#dlg .box{background:var(--canvas);border:1px solid var(--line);border-radius:8px;width:min(640px,100%);max-height:100%;
+  overflow:auto;display:flex;flex-direction:column;gap:14px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.18);box-sizing:border-box}
+#dlg .top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#dlg h2{margin:0;font-size:16px}
+#dlg h3{margin:0 0 6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+#dlg p{margin:0;font-size:13.5px;line-height:1.5;max-width:65ch}
+.keys{font-size:13.5px;display:grid;grid-template-columns:max-content 1fr;gap:5px 14px;margin:0}
+.keys dt{white-space:nowrap}
+.keys dd{margin:0;color:var(--muted)}
+.keys kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--bg)}
+#dlg code{font:12.5px var(--mono)}
+
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;
+  max-width:min(560px,calc(100% - 32px));background:var(--fg);color:var(--canvas);padding:8px 14px;border-radius:6px;
+  font-size:13.5px;line-height:1.4;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+#toast.err{background:var(--danger)}
+main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
+
+@media (max-width:720px){
+  main{flex-direction:column}
+  aside{width:auto;border-left:0;border-top:1px solid var(--line);height:34%;flex:none;
+    padding-left:max(16px,env(safe-area-inset-left,0px))}
+}
+/* Phones (portrait or landscape): no title, and no key hints on the buttons */
+@media (max-width:720px), (max-height:500px){
+  header{gap:4px 6px;padding-block:4px}
+  header h1, header > .sep{display:none}
+  header button{padding:4px 7px}
+  button kbd{display:none}
+  #toolbar{display:contents}
+  #toolbar .group{flex-wrap:nowrap}
+  #toolbar .group + .group{border-left:0;padding-left:0}
+  #toolbar .history{margin-left:auto}
+}
+/* Narrow screens: the menus and Undo/Redo on one row, the editing commands on the next */
+@media (max-width:720px){
+  #toolbar .history{order:1}
+  #toolbar .edit{order:2;width:100%}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Diagram Editor</h1>
+  <nav id="menubar">
+    <div class="menu">
+      <button class="mb" id="mbFile" aria-haspopup="true" aria-expanded="false" aria-controls="mFile">File</button>
+      <div class="pop" id="mFile" hidden>
+        <button id="bNew">New diagram</button>
+        <button id="bOpen">Open…<kbd>Ctrl+O</kbd></button>
+        <button id="bSave">Save<kbd>Ctrl+S</kbd></button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="mb" id="mbView" aria-haspopup="true" aria-expanded="false" aria-controls="mView">View</button>
+      <div class="pop" id="mView" hidden>
+        <button id="bZoomIn">Zoom in<kbd>+</kbd></button>
+        <button id="bZoomOut">Zoom out<kbd>-</kbd></button>
+        <button id="bFit">Show the whole diagram<kbd>0</kbd></button>
+      </div>
+    </div>
+    <button class="mb" id="bHelp" title="Help (?)">Help</button>
+  </nav>
+  <span class="sep"></span>
+  <div id="toolbar">
+    <div class="group edit">
+      <button id="bNode" title="Add a node (N)">Node<kbd>N</kbd></button>
+      <button id="bEdit" title="Edit the label (F2 or double-click)">Edit<kbd>F2</kbd></button>
+      <button id="bDel" class="danger" title="Delete the selected node or edge (Delete)">Delete<kbd>Del</kbd></button>
+    </div>
+    <div class="group history">
+      <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
+      <button id="bRedo" title="Redo (Ctrl+Y)">Redo</button>
+    </div>
+  </div>
+</header>
+
+<input id="fileIn" type="file" accept=".yaml,.yml" hidden>
+<div id="toast" role="status" hidden></div>
+
+<main>
+  <div id="vp" tabindex="0">
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" aria-label="Diagram"><g id="view"><g id="edgeLayer"></g><g id="nodeLayer"></g></g></svg>
+    <div id="empty">An empty diagram. Press <b>&nbsp;Node&nbsp;</b> to add a node, or open a file from the File menu.</div>
+  </div>
+  <aside>
+    <h2>Diagram</h2>
+    <label for="title">Title</label>
+    <input id="title" autocomplete="off">
+    <label for="kind">Kind</label>
+    <input id="kind" list="kinds" placeholder="dataflow, flowchart, …" autocomplete="off" spellcheck="false">
+    <datalist id="kinds"><option value="dataflow"><option value="flowchart"><option value="er"><option value="class"></datalist>
+
+    <div class="pane" id="nonePane"><h2>Selection</h2><p>Select a node or an edge to see its details.</p></div>
+    <div class="pane" id="nodePane" hidden>
+      <h2>Selected node</h2>
+      <p>Id: <code id="selId"></code></p>
+      <label for="type">Type</label>
+      <input id="type" list="types" placeholder="process, store, decision, …" autocomplete="off" spellcheck="false">
+      <datalist id="types"><option value="process"><option value="store"><option value="external"><option value="step"><option value="decision"><option value="start"><option value="end"></datalist>
+      <label>Ports</label>
+      <p id="selPorts"></p>
+    </div>
+    <div class="pane" id="edgePane" hidden>
+      <h2>Selected edge</h2>
+      <p><code id="selEdge"></code></p>
+      <label for="edgeLabel">Label</label>
+      <input id="edgeLabel" placeholder="Optional label" autocomplete="off">
+    </div>
+  </aside>
+</main>
+
+<div id="dlg" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="dlgT">
+    <div class="top"><h2 id="dlgT">How to use the editor</h2><button id="hClose">Close</button></div>
+    <section>
+      <h3>What a diagram is</h3>
+      <p>Nodes with named input and output ports, and edges that each run from an output port to an input port. Every node has an id, shown in the panel, which stays the same when you change its label; programs that read the saved file refer to nodes by it.</p>
+    </section>
+    <section>
+      <h3>Mouse and touch</h3>
+      <dl class="keys">
+        <dt>Click or tap</dt><dd>Select a node or an edge.</dd>
+        <dt>Drag a node</dt><dd>Move it. Its edges follow.</dd>
+        <dt>Double-click or tap</dt><dd>Edit a node's label.</dd>
+        <dt>Drag empty space</dt><dd>Move around the diagram.</dd>
+        <dt>Pinch, or <kbd>Ctrl</kbd> + wheel</dt><dd>Zoom in and out.</dd>
+        <dt>Hover a port</dt><dd>Shows its name and data type.</dd>
+      </dl>
+    </section>
+    <section>
+      <h3>Keyboard</h3>
+      <dl class="keys">
+        <dt><kbd>N</kbd></dt><dd>Add a node.</dd>
+        <dt><kbd>F2</kbd></dt><dd>Edit the selected node's label. <kbd>Enter</kbd> finishes, <kbd>Shift</kbd>+<kbd>Enter</kbd> starts a new line, <kbd>Esc</kbd> cancels.</dd>
+        <dt><kbd>Delete</kbd></dt><dd>Delete the selected node, with its edges, or the selected edge.</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></dt><dd>Undo and redo.</dd>
+        <dt><kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></dt><dd>Zoom in, zoom out, show the whole diagram.</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>O</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Open and save.</dd>
+      </dl>
+    </section>
+    <section>
+      <h3>Saving</h3>
+      <p><b>Save</b> downloads the diagram as a YAML file named after its title; <b>Open</b> reads one back, and you can also drop a file on the diagram. The format is defined by <code>diagram-schema.json</code>. The diagram is also kept in this browser between visits, but not shared with other browsers or devices.</p>
+    </section>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const SVG = 'http://www.w3.org/2000/svg';
+const STORE = 'diagram-editor';
+const svg = $('#canvas'), vp = $('#vp');
+
+/* ---------- the diagram ---------- */
+// doc is the diagram in memory: the file's content, with nodes and ports as lists so their order is kept.
+//   { title, kind, note, properties, nodes: [{ id, type, label, inputs: [port], outputs: [port], properties, note, image, layout }],
+//     edges: [{ from, to, type, label, from_label, to_label, from_end, to_end, properties, layout }] }
+// A port is { name, type, layout }. Fields a file didn't give are undefined, and are left out again on saving.
+const blank = () => ({ title: 'New diagram', nodes: [], edges: [] });
+let doc = load() || blank();
+let sel = null;                       // { node: id } or { edge: index }
+let view = { x: 0, y: 0, k: 1 };      // the diagram is drawn at translate(x, y) scale(k)
+const undoStack = [], redoStack = [];
+
+function load() {
+  try { const d = JSON.parse(localStorage.getItem(STORE)); if (d && typeof d.title === 'string' && Array.isArray(d.nodes)) return d; } catch (e) {}
+  return null;
+}
+function store() { try { localStorage.setItem(STORE, JSON.stringify(doc)); } catch (e) {} }
+function snapshot() { undoStack.push(JSON.stringify(doc)); if (undoStack.length > 200) undoStack.shift(); redoStack.length = 0; }
+function restore(from, to) {
+  if (!from.length) return;
+  to.push(JSON.stringify(doc));
+  doc = JSON.parse(from.pop()); sel = null;
+  changed();
+}
+const undo = () => restore(undoStack, redoStack), redo = () => restore(redoStack, undoStack);
+function changed() { store(); render(); }
+
+const nodeById = id => doc.nodes.find(n => n.id === id);
+const endNode = end => end.split('.')[0];
+function slug(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40); }
+// A node's id is made from its label once, when the node is created, and then never changes.
+function newId(label) {
+  let id = slug(label) || 'node', base = id, i = 2;
+  while (nodeById(id)) id = `${base}_${i++}`;
+  return id;
+}
+
+/* ---------- YAML ---------- */
+const NAME = /^[a-zA-Z0-9_]+$/;
+const isMap = o => o && typeof o === 'object' && !Array.isArray(o);
+const str = v => typeof v === 'string' && v !== '' ? v : undefined;
+const num = v => typeof v === 'number' && isFinite(v) ? v : undefined;
+const clean = o => { for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k]; return o; };
+const props = v => isMap(v) && Object.keys(v).length ? JSON.parse(JSON.stringify(v)) : undefined;
+
+function fromYaml(text) {
+  let file;
+  try { file = jsyaml.load(text); }
+  catch (e) { throw new Error('This file is not valid YAML: ' + (e.reason || e.message) + '.'); }
+  if (!isMap(file) || !isMap(file.diagram)) throw new Error('This file has no top-level "diagram" key, so it is not a diagram.');
+  const d = file.diagram;
+  if (typeof d.title !== 'string') throw new Error('In this file, the diagram has no title.');
+  const out = clean({ title: d.title, kind: str(d.kind), note: str(d.note), properties: props(d.properties), nodes: [], edges: [] });
+  if (d.nodes != null && !isMap(d.nodes)) throw new Error('In this file, nodes is not a set of nodes named by their ids.');
+  const ports = (o, id, what) => {
+    if (o == null) return [];
+    if (!isMap(o)) throw new Error(`In this file, the ${what} of ${id} are not a set of named ports.`);
+    return Object.entries(o).map(([name, p]) => {
+      if (!NAME.test(name)) throw new Error(`In this file, ${id} has a port named "${name}"; use only letters, digits and _.`);
+      const L = isMap(p) && isMap(p.layout) ? clean({ side: ['left', 'right', 'top', 'bottom'].includes(p.layout.side) ? p.layout.side : undefined, at: num(p.layout.at) }) : {};
+      return clean({ name, type: isMap(p) ? str(p.type) : undefined, layout: Object.keys(L).length ? L : undefined });
+    });
+  };
+  for (const [id, n] of Object.entries(d.nodes || {})) {
+    if (!NAME.test(id)) throw new Error(`In this file, "${id}" is not a node id; use only letters, digits and _.`);
+    if (n != null && !isMap(n)) throw new Error(`In this file, ${id} is not a node.`);
+    const o = n || {};
+    if (o.label != null && typeof o.label !== 'string') throw new Error(`In this file, the label of ${id} is not text; put it in quotes.`);
+    const L = isMap(o.layout) && num(o.layout.x) !== undefined && num(o.layout.y) !== undefined
+      ? clean({ x: o.layout.x, y: o.layout.y, w: num(o.layout.w) > 0 ? o.layout.w : undefined, h: num(o.layout.h) > 0 ? o.layout.h : undefined }) : undefined;
+    out.nodes.push(clean({ id, type: str(o.type), label: str(o.label), inputs: ports(o.inputs, id, 'inputs'), outputs: ports(o.outputs, id, 'outputs'),
+                           properties: props(o.properties), note: str(o.note), image: str(o.image), layout: L }));
+  }
+  if (d.edges != null && !Array.isArray(d.edges)) throw new Error('In this file, edges is not a list.');
+  const has = (end, list) => {
+    const [id, port] = end.split('.'), n = out.nodes.find(n => n.id === id);
+    return n && n[list].some(p => p.name === port);
+  };
+  for (const e of d.edges || []) {
+    for (const k of ['from', 'to']) {
+      if (!isMap(e) || typeof e[k] !== 'string') throw new Error(`In this file, an edge has no "${k}".`);
+      if (!/^[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+$/.test(e[k])) throw new Error(`In this file, an edge's "${k}" is "${e[k]}", which doesn't name a port; write it as node.port.`);
+    }
+    if (!has(e.from, 'outputs')) throw new Error(`In this file, an edge starts from ${e.from}, which is not an output port of a node in the diagram.`);
+    if (!has(e.to, 'inputs')) throw new Error(`In this file, an edge goes to ${e.to}, which is not an input port of a node in the diagram.`);
+    const c = isMap(e.layout) && e.layout.curve;
+    const curve = Array.isArray(c) && c.length === 2 && c.every(p => Array.isArray(p) && p.length === 2 && p.every(v => num(v) !== undefined)) ? c.map(p => [...p]) : undefined;
+    out.edges.push(clean({ from: e.from, to: e.to, type: str(e.type), label: str(e.label), from_label: str(e.from_label), to_label: str(e.to_label),
+                           from_end: str(e.from_end), to_end: str(e.to_end), properties: props(e.properties), layout: curve ? { curve } : undefined }));
+  }
+  return out;
+}
+// The file's content: everything in the order the schema gives, with empty things left out.
+function toFile() {
+  const portsOut = list => list.length ? Object.fromEntries(list.map(p => [p.name, clean({ type: p.type, layout: p.layout })])) : undefined;
+  const d = clean({ title: doc.title, kind: doc.kind, note: doc.note, properties: doc.properties });
+  if (doc.nodes.length) d.nodes = Object.fromEntries(doc.nodes.map(n => [n.id, clean({
+    type: n.type, label: n.label, inputs: portsOut(n.inputs), outputs: portsOut(n.outputs),
+    properties: n.properties, note: n.note, image: n.image, layout: n.layout })]));
+  if (doc.edges.length) d.edges = doc.edges.map(e => clean({ ...e }));
+  return { diagram: d };
+}
+const toYaml = () => jsyaml.dump(toFile(), { lineWidth: -1, noRefs: true, sortKeys: false });
+
+/* ---------- geometry ---------- */
+const measurer = document.createElement('canvas').getContext('2d');
+function textWidth(t) { measurer.font = '14px "IBM Plex Sans", system-ui, sans-serif'; return measurer.measureText(t).width; }
+const lines = n => (n.label || '').split('\n');
+// A node's size: what the file says, or else big enough for its label.
+function size(n) {
+  const L = n.layout || {};
+  if (L.w && L.h) return { w: L.w, h: L.h };
+  let w = Math.max(100, Math.ceil(Math.max(...lines(n).map(textWidth)) / 10) * 10 + 30), h = Math.max(50, lines(n).length * 19 + 22);
+  if (n.type === 'decision') { w = Math.round(w * 1.5 / 10) * 10; h = Math.round(h * 1.5 / 10) * 10; }
+  return { w: L.w || w, h: L.h || h };
+}
+const NORMAL = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
+// Where each port of a node sits, relative to the node's top left corner. Inputs go on the left and outputs on the
+// right unless the port says otherwise; ports that don't say how far along their side they are share it evenly.
+function portPoints(n) {
+  const { w, h } = size(n), sides = { left: [], right: [], top: [], bottom: [] }, out = [];
+  for (const [dir, list, side] of [['in', n.inputs, 'left'], ['out', n.outputs, 'right']])
+    for (const p of list) sides[p.layout?.side || side].push({ dir, p });
+  for (const [side, ps] of Object.entries(sides)) {
+    const free = ps.filter(q => q.p.layout?.at == null).length;
+    let i = 0;
+    for (const { dir, p } of ps) {
+      const at = p.layout?.at ?? ++i / (free + 1);
+      const inset = n.type === 'decision' ? Math.abs(2 * at - 1) / 2 : 0;       // a diamond's sides slope inwards
+      const [x, y] = side === 'left' ? [inset * w, at * h] : side === 'right' ? [w - inset * w, at * h]
+        : side === 'top' ? [at * w, inset * h] : [at * w, h - inset * h];
+      out.push({ dir, name: p.name, type: p.type, side, x, y });
+    }
+  }
+  return out;
+}
+function portAt(end, dir) {
+  const [id, name] = end.split('.'), n = nodeById(id);
+  const p = portPoints(n).find(p => p.dir === dir && p.name === name);
+  return { x: n.layout.x + p.x, y: n.layout.y + p.y, side: p.side };
+}
+// The cubic Bézier an edge is drawn as: [start, control 1, control 2, end].
+function curveOf(e) {
+  const a = portAt(e.from, 'out'), b = portAt(e.to, 'in');
+  if (e.layout?.curve) return [[a.x, a.y], e.layout.curve[0], e.layout.curve[1], [b.x, b.y]];
+  const d = Math.min(120, Math.max(30, Math.hypot(b.x - a.x, b.y - a.y) / 2));
+  const [ax, ay] = NORMAL[a.side], [bx, by] = NORMAL[b.side];
+  return [[a.x, a.y], [a.x + ax * d, a.y + ay * d], [b.x + bx * d, b.y + by * d], [b.x, b.y]];
+}
+function along([p0, p1, p2, p3], t) {
+  const u = 1 - t, f = i => u * u * u * p0[i] + 3 * u * u * t * p1[i] + 3 * u * t * t * p2[i] + t * t * t * p3[i];
+  return [f(0), f(1)];
+}
+const overlaps = (a, b, gap = 0) => a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+const boxOf = n => ({ x: n.layout.x, y: n.layout.y, ...size(n) });
+// The rectangle around every node that has a position, and the edges between them.
+function bounds() {
+  const placed = doc.nodes.filter(n => n.layout), bs = placed.map(boxOf);
+  if (!bs.length) return null;
+  const ok = end => placed.some(n => n.id === endNode(end));
+  for (const e of doc.edges.filter(e => ok(e.from) && ok(e.to)))
+    for (let t = 0.1; t < 1; t += 0.1) { const [x, y] = along(curveOf(e), t); bs.push({ x: x - 12, y: y - 12, w: 24, h: 24 }); }
+  const x = Math.min(...bs.map(b => b.x)), y = Math.min(...bs.map(b => b.y));
+  return { x, y, w: Math.max(...bs.map(b => b.x + b.w)) - x, h: Math.max(...bs.map(b => b.y + b.h)) - y };
+}
+// Give a position to every node that has none: in columns from left to right, each node to the right of the
+// nodes whose edges lead to it. They go below any nodes that already have positions.
+function placeNodes() {
+  const todo = doc.nodes.filter(n => !n.layout);
+  if (!todo.length) return;
+  const rank = new Map(todo.map(n => [n.id, 0]));
+  for (let pass = 0; pass < todo.length; pass++)
+    for (const e of doc.edges) {
+      const a = endNode(e.from), b = endNode(e.to);
+      if (a !== b && rank.has(a) && rank.has(b) && rank.get(b) <= rank.get(a) && rank.get(a) < todo.length - 1) rank.set(b, rank.get(a) + 1);
+    }
+  const b = bounds();
+  let x = 40;
+  const top = b ? b.y + b.h + 60 : 40;
+  for (let r = 0; r < todo.length; r++) {
+    const column = todo.filter(n => rank.get(n.id) === r);
+    let y = top;
+    for (const n of column) { n.layout = { x, y }; y += size(n).h + 40; }
+    if (column.length) x += Math.max(...column.map(n => size(n).w)) + 80;
+  }
+}
+
+/* ---------- drawing ---------- */
+function el(name, attrs = {}, parent) {
+  const e = document.createElementNS(SVG, name);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.append(e);
+  return e;
+}
+function drawShape(g, n, w, h) {
+  const t = n.type;
+  if (t === 'decision') return el('polygon', { class: 'shape', points: `${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}` }, g);
+  const rx = t === 'start' || t === 'end' ? h / 2 : t === 'process' ? 9 : 0;
+  el('rect', { class: 'shape', width: w, height: h, rx }, g);
+  if (t === 'store') el('path', { class: 'mark', d: `M12 0V${h}` }, g);                                  // a data store's bar
+  if (t === 'external') el('path', { class: 'mark', d: `M4 ${h + 4}H${w + 4}V4` }, g);                   // an outside party's shadow
+}
+function render() {
+  const nodeLayer = $('#nodeLayer'), edgeLayer = $('#edgeLayer');
+  nodeLayer.replaceChildren(); edgeLayer.replaceChildren();
+  $('#view').setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.k})`);
+  $('#empty').hidden = doc.nodes.length > 0;
+  for (const n of doc.nodes) {
+    const { w, h } = size(n);
+    const g = el('g', { class: 'node' + (sel?.node === n.id ? ' sel' : ''), 'data-id': n.id, transform: `translate(${n.layout.x} ${n.layout.y})` }, nodeLayer);
+    drawShape(g, n, w, h);
+    const ls = lines(n), text = el('text', { class: 'label', x: w / 2, y: h / 2 - (ls.length - 1) * 9.5 }, g);
+    ls.forEach((line, i) => { el('tspan', { x: w / 2, dy: i ? 19 : '0.35em' }, text).textContent = line; });
+    for (const p of portPoints(n)) {
+      const c = el('circle', { class: 'port', 'data-dir': p.dir, 'data-port': p.name, cx: p.x, cy: p.y, r: 4.5 }, g);
+      el('title', {}, c).textContent = `${p.dir === 'in' ? 'Input' : 'Output'} ${p.name}` + (p.type ? `: ${p.type}` : '');
+    }
+  }
+  doc.edges.forEach((e, i) => {
+    const c = curveOf(e), d = `M${c[0]} C${c[1]} ${c[2]} ${c[3]}`, on = sel?.edge === i ? ' sel' : '';
+    const g = el('g', { 'data-edge': i }, edgeLayer);
+    el('path', { class: 'edge' + on, d, 'data-from': e.from, 'data-to': e.to }, g);
+    el('path', { class: 'ehit', d }, g);
+    for (const [end, tip, back] of [[e.to_end ?? 'arrow', c[3], c[2]], [e.from_end ?? 'none', c[0], c[1]]]) {
+      if (end === 'none') continue;                       // the other decorations are still drawn as plain arrows
+      let dx = tip[0] - back[0], dy = tip[1] - back[1];
+      const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+      const bx = tip[0] - dx * 10, by = tip[1] - dy * 10;
+      el('path', { class: 'arrow' + on, d: `M${tip} L${bx - dy * 4.5},${by + dx * 4.5} L${bx + dy * 4.5},${by - dx * 4.5}Z` }, g);
+    }
+    for (const [text, t, cls] of [[e.label, 0.5, 'elabel' + on], [e.from_label, 0.15, 'endlabel'], [e.to_label, 0.85, 'endlabel']]) {
+      if (!text) continue;
+      const [x, y] = along(c, t);
+      el('text', { class: cls, x, y: y - 5 }, g).textContent = text;
+    }
+  });
+  updatePanel();
+}
+function setValue(input, value) { if (document.activeElement !== input) input.value = value || ''; }
+function updatePanel() {
+  setValue($('#title'), doc.title); setValue($('#kind'), doc.kind);
+  const n = sel?.node != null ? nodeById(sel.node) : null, e = sel?.edge != null ? doc.edges[sel.edge] : null;
+  $('#nonePane').hidden = !!(n || e); $('#nodePane').hidden = !n; $('#edgePane').hidden = !e;
+  if (n) {
+    $('#selId').textContent = n.id; setValue($('#type'), n.type);
+    const list = (what, ps) => ps.length ? `${what}: ${ps.map(p => p.name + (p.type ? ` (${p.type})` : '')).join(', ')}` : '';
+    $('#selPorts').textContent = [list('Inputs', n.inputs), list('Outputs', n.outputs)].filter(Boolean).join('. ') || 'None yet.';
+  }
+  if (e) { $('#selEdge').textContent = `${e.from} → ${e.to}`; setValue($('#edgeLabel'), e.label); }
+  $('#bUndo').disabled = !undoStack.length; $('#bRedo').disabled = !redoStack.length;
+  $('#bEdit').disabled = !n; $('#bDel').disabled = !(n || e);
+}
+
+/* ---------- the view ---------- */
+function fit() {
+  const b = bounds(), W = vp.clientWidth, H = vp.clientHeight;
+  if (!b || !W || !H) { view = { x: 0, y: 0, k: 1 }; return render(); }
+  const k = Math.min(1, (W - 48) / b.w, (H - 48) / b.h);
+  view = { k, x: (W - b.w * k) / 2 - b.x * k, y: (H - b.h * k) / 2 - b.y * k };
+  render();
+}
+function zoom(factor, cx = vp.clientWidth / 2, cy = vp.clientHeight / 2) {
+  const k = Math.min(4, Math.max(0.2, view.k * factor));
+  view = { k, x: cx - (cx - view.x) * k / view.k, y: cy - (cy - view.y) * k / view.k };
+  render();
+}
+
+/* ---------- editing ---------- */
+function addNode() {
+  finishEdit();
+  snapshot();
+  const n = { id: newId('Node'), label: 'Node', inputs: [], outputs: [] }, { w, h } = size(n);
+  const b = { x: Math.round(((vp.clientWidth / 2 - view.x) / view.k - w / 2) / 10) * 10, y: Math.round(((vp.clientHeight / 2 - view.y) / view.k - h / 2) / 10) * 10, w, h };
+  while (doc.nodes.some(m => overlaps(b, boxOf(m), 20))) b.y += 10;           // below anything already there
+  n.layout = { x: b.x, y: b.y };
+  doc.nodes.push(n); sel = { node: n.id };
+  changed();
+}
+function deleteSelected() {
+  if (!sel) return;
+  snapshot();
+  if (sel.node != null) {
+    doc.nodes = doc.nodes.filter(n => n.id !== sel.node);
+    doc.edges = doc.edges.filter(e => endNode(e.from) !== sel.node && endNode(e.to) !== sel.node);
+  } else doc.edges.splice(sel.edge, 1);
+  sel = null;
+  changed();
+}
+let editing = null;      // the id of the node whose label is being typed
+function editLabel() {
+  const n = sel?.node != null && nodeById(sel.node);
+  if (!n || editing) return;
+  const r = svg.querySelector(`g.node[data-id="${n.id}"] .shape`).getBoundingClientRect(), o = vp.getBoundingClientRect();
+  const box = document.createElement('textarea');
+  box.id = 'edit'; box.value = n.label || ''; box.setAttribute('aria-label', 'Label');
+  const w = Math.max(r.width, 120), h = Math.max(r.height, 40);
+  Object.assign(box.style, { left: r.left - o.left + (r.width - w) / 2 + 'px', top: r.top - o.top + (r.height - h) / 2 + 'px', width: w + 'px', height: h + 'px' });
+  vp.append(box); editing = n.id;
+  box.focus(); box.select();
+  box.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finishEdit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); finishEdit(false); }
+  });
+  box.addEventListener('blur', () => finishEdit());
+}
+function finishEdit(keep = true) {
+  const box = $('#edit');
+  if (!box || !editing) return;
+  const n = nodeById(editing), label = box.value.replace(/\s+$/, '');
+  editing = null; box.remove();
+  if (keep && n && label !== (n.label || '')) { snapshot(); if (label) n.label = label; else delete n.label; changed(); }
+  vp.focus({ preventScroll: true });
+}
+// A text box in the panel: typing changes the diagram at once, and the whole visit to the box is one undo step.
+function bind(input, set) {
+  let fresh = true;
+  input.addEventListener('focus', () => { fresh = true; });
+  input.addEventListener('input', () => { if (fresh) { snapshot(); fresh = false; } set(input.value); changed(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { input.blur(); vp.focus({ preventScroll: true }); } });
+}
+const setOr = (o, k, v) => { if (v) o[k] = v; else delete o[k]; };
+bind($('#title'), v => { doc.title = v; });
+bind($('#kind'), v => setOr(doc, 'kind', v.trim()));
+bind($('#type'), v => { const n = nodeById(sel?.node); if (n) setOr(n, 'type', v.trim()); });
+bind($('#edgeLabel'), v => { const e = doc.edges[sel?.edge]; if (e) setOr(e, 'label', v); });
+
+/* ---------- mouse and touch ---------- */
+let drag = null, lastTap = { id: null, time: 0 };
+const fingers = new Map();            // the pointers that are down, for zooming with two fingers
+let pinch = null;
+const capture = e => { try { svg.setPointerCapture(e.pointerId); } catch (err) {} };
+function pinchState() {
+  const [a, b] = [...fingers.values()], r = svg.getBoundingClientRect();
+  return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+}
+svg.addEventListener('pointerdown', e => {
+  if (e.button) return;
+  finishEdit();
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (fingers.size === 2) { drag = null; pinch = pinchState(); capture(e); return; }
+  const node = e.target.closest('g.node'), edge = e.target.closest('g[data-edge]');
+  if (node) {
+    const n = nodeById(node.dataset.id);
+    sel = { node: n.id };
+    drag = { node: n, x: e.clientX, y: e.clientY, from: { ...n.layout }, moved: false };
+  } else if (edge) { sel = { edge: +edge.dataset.edge }; drag = null; }
+  else { sel = null; drag = { pan: true, x: e.clientX, y: e.clientY, from: { ...view }, moved: false }; }
+  if (drag) capture(e);
+  render();
+  vp.focus({ preventScroll: true });
+});
+svg.addEventListener('pointermove', e => {
+  if (fingers.has(e.pointerId)) fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && fingers.size === 2) {                      // two fingers: zoom about the point between them, and move with it
+    const now = pinchState();
+    view.x += now.x - pinch.x; view.y += now.y - pinch.y;
+    zoom(now.d / pinch.d, now.x, now.y);
+    pinch = now;
+    return;
+  }
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+  if (drag.pan) { view.x = drag.from.x + dx; view.y = drag.from.y + dy; svg.classList.add('panning'); }
+  else {
+    if (!drag.moved) snapshot();
+    drag.node.layout.x = Math.round(drag.from.x + dx / view.k); drag.node.layout.y = Math.round(drag.from.y + dy / view.k);
+  }
+  drag.moved = true;
+  render();
+});
+function endDrag(e) {
+  fingers.delete(e.pointerId);
+  if (fingers.size < 2) pinch = null;
+  if (!drag) return;
+  const d = drag; drag = null;
+  svg.classList.remove('panning');
+  if (d.moved) { if (d.node) store(); return; }
+  if (d.node) {                                           // a tap: a second one soon after edits the label
+    const now = Date.now();
+    if (lastTap.id === d.node.id && now - lastTap.time < 400) { lastTap = { id: null, time: 0 }; editLabel(); }
+    else lastTap = { id: d.node.id, time: now };
+  }
+}
+svg.addEventListener('pointerup', endDrag);
+svg.addEventListener('pointercancel', endDrag);
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = svg.getBoundingClientRect();
+  if (e.ctrlKey || e.metaKey) zoom(Math.exp(-e.deltaY / 300), e.clientX - r.left, e.clientY - r.top);
+  else { view.x -= e.deltaX; view.y -= e.deltaY; render(); }
+}, { passive: false });
+
+/* ---------- files ---------- */
+let toastTimer;
+function toast(text, isError = false) {
+  const t = $('#toast');
+  t.textContent = text; t.className = isError ? 'err' : ''; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 9000 : 4000);
+}
+function libsReady() {
+  if (window.jsyaml) return true;
+  toast('Open and Save need an internet connection the first time the page loads. Reload the page and try again.', true);
+  return false;
+}
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// Inside Claude, files are offered through the downloads capability; elsewhere, an ordinary download.
+const downloadsP = window.claude?.use ? window.claude.use('downloads') : Promise.resolve(null);
+async function saveFile(name, blob) {
+  const downloads = await downloadsP;
+  if (downloads) {
+    try { await downloads.save({ filename: name, data: blob }); return true; }
+    catch (e) {
+      if (!(e && e.code === 'declined')) toast('Save failed: ' + (e && e.message || e), true);
+      return false;
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return true;
+}
+async function saveDiagram() {
+  if (!libsReady()) return;
+  finishEdit();
+  const name = (slug(doc.title) || 'diagram') + '.yaml';
+  if (await saveFile(name, new Blob([toYaml()], { type: 'application/yaml' })))
+    toast(`Saved ${name}: ${plural(doc.nodes.length, 'node')}, ${plural(doc.edges.length, 'edge')}.`);
+}
+async function openFile(file) {
+  if (!libsReady()) return false;
+  finishEdit();
+  try {
+    if (!/\.ya?ml$/i.test(file.name)) throw new Error(`${file.name} is not a .yaml file.`);
+    const d = fromYaml(await file.text());
+    snapshot();
+    doc = d; sel = null;
+    placeNodes(); store(); fit();
+    toast(`Opened ${file.name}: ${plural(doc.nodes.length, 'node')}, ${plural(doc.edges.length, 'edge')}.`);
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+function newDiagram() {
+  finishEdit();
+  snapshot();
+  doc = blank(); sel = null; view = { x: 0, y: 0, k: 1 };
+  changed();
+  toast('New diagram.');
+}
+$('#fileIn').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); });
+const main = $('main');
+main.addEventListener('dragover', e => { e.preventDefault(); main.classList.add('drop'); });
+main.addEventListener('dragleave', () => main.classList.remove('drop'));
+main.addEventListener('drop', e => { e.preventDefault(); main.classList.remove('drop'); const f = e.dataTransfer.files[0]; if (f) openFile(f); });
+
+/* ---------- menus, buttons and keys ---------- */
+function closeMenus() {
+  for (const b of document.querySelectorAll('button.mb[aria-expanded="true"]')) { b.setAttribute('aria-expanded', 'false'); $('#' + b.getAttribute('aria-controls')).hidden = true; }
+}
+for (const b of document.querySelectorAll('button.mb[aria-controls]'))
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    const open = b.getAttribute('aria-expanded') === 'true';
+    closeMenus();
+    if (!open) { b.setAttribute('aria-expanded', 'true'); $('#' + b.getAttribute('aria-controls')).hidden = false; }
+  });
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu')) closeMenus(); });
+const openHelp = () => { $('#dlg').hidden = false; $('#hClose').focus(); };
+const closeHelp = () => { $('#dlg').hidden = true; vp.focus({ preventScroll: true }); };
+const commands = {
+  bNew: newDiagram, bOpen: () => $('#fileIn').click(), bSave: saveDiagram,
+  bZoomIn: () => zoom(1.25), bZoomOut: () => zoom(0.8), bFit: fit,
+  bNode: addNode, bEdit: editLabel, bDel: deleteSelected, bUndo: undo, bRedo: redo,
+  bHelp: openHelp, hClose: closeHelp,
+};
+for (const [id, run] of Object.entries(commands)) $('#' + id).addEventListener('click', () => { closeMenus(); run(); });
+$('#dlg').addEventListener('pointerdown', e => { if (e.target === $('#dlg')) closeHelp(); });
+
+document.addEventListener('keydown', e => {
+  const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+  if (e.key === 'Escape') { if (!$('#dlg').hidden) closeHelp(); closeMenus(); return; }
+  if (ctrl && key === 's') { e.preventDefault(); return saveDiagram(); }
+  if (ctrl && key === 'o') { e.preventDefault(); return $('#fileIn').click(); }
+  if (e.target.closest('input, textarea, select') || !$('#dlg').hidden) return;
+  if (ctrl && key === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
+  if (ctrl && key === 'y') { e.preventDefault(); return redo(); }
+  if (ctrl || e.altKey) return;
+  const run = { n: addNode, f2: editLabel, delete: deleteSelected, backspace: deleteSelected, '?': openHelp,
+                '+': () => zoom(1.25), '=': () => zoom(1.25), '-': () => zoom(0.8), '0': fit }[key];
+  if (run) { e.preventDefault(); run(); }
+});
+
+placeNodes();
+fit();
+window.addEventListener('resize', render);
+</script>
+</body>
+</html>
