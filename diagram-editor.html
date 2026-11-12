@@ -45,6 +45,7 @@ button:disabled{opacity:.45;cursor:default;border-color:var(--line)}
 button.danger{color:var(--danger)}
 button[aria-pressed="true"]{background:var(--sel);border-color:var(--accent)}
 button kbd{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
+body.server-file #bSave kbd, body:not(.server-file) #bServerSave kbd{display:none}
 
 #toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
 #toolbar .group + .group{padding-left:12px;border-left:1px solid var(--line)}
@@ -58,6 +59,15 @@ button.mb[aria-expanded="true"]{background:var(--sel);border-color:var(--line)}
   border-radius:7px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:190px}
 .pop > button{border-color:transparent;background:transparent;text-align:left;display:flex;justify-content:space-between;gap:20px;padding:7px 10px}
 .pop > button:hover:not(:disabled){background:var(--sel)}
+#serverFiles{border:1px solid var(--line);border-radius:8px;background:var(--canvas);color:var(--fg);padding:16px 18px;
+  width:min(420px,calc(100vw - 32px));box-sizing:border-box;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+#serverFiles::backdrop{background:color-mix(in srgb,var(--bg) 70%,transparent)}
+#serverFiles h2{margin:0 0 10px;font-size:16px}
+#serverList{display:flex;flex-direction:column;gap:4px;max-height:60vh;overflow:auto}
+#serverList button{display:flex;justify-content:space-between;align-items:baseline;gap:12px;text-align:left;padding:8px 10px}
+#serverList small{color:var(--muted);white-space:nowrap}
+#serverList p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted)}
+#serverFiles form{display:flex;justify-content:flex-end;margin-top:12px}
 
 main{flex:1;display:flex;min-height:0}
 #vp{flex:1;position:relative;background:var(--canvas);min-width:0;min-height:0;overflow:hidden}
@@ -168,6 +178,8 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <button id="bNew">New diagram</button>
         <button id="bOpen">Open…<kbd>Ctrl+O</kbd></button>
         <button id="bSave">Save<kbd>Ctrl+S</kbd></button>
+        <button id="bServerOpen" hidden>Open from server…</button>
+        <button id="bServerSave" hidden>Save to server<kbd>Ctrl+S</kbd></button>
       </div>
     </div>
     <div class="menu">
@@ -197,6 +209,11 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
 
 <input id="fileIn" type="file" accept=".yaml,.yml" hidden>
 <div id="toast" role="status" hidden></div>
+<dialog id="serverFiles" aria-labelledby="serverFilesTitle">
+  <h2 id="serverFilesTitle">Open from server</h2>
+  <div id="serverList"></div>
+  <form method="dialog"><button>Cancel</button></form>
+</dialog>
 
 <main>
   <div id="vp" tabindex="0">
@@ -274,6 +291,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <section>
       <h3>Saving</h3>
       <p><b>Save</b> downloads the diagram as a YAML file named after its title; <b>Open</b> reads one back, and you can also drop a file on the diagram. The format is defined by <code>diagram-schema.json</code>. The diagram is also kept in this browser between visits, but not shared with other browsers or devices.</p>
+      <p>When the editor comes from the mind map server on your network (<code>mindmap_server.py</code>), the File menu also has <b>Open from server…</b> and <b>Save to server</b>, so every device sees the same diagrams. While a diagram from the server is open, the address bar links to it (for example from a note), <kbd>Ctrl</kbd>+<kbd>S</kbd> saves it back to the server, and the browser asks before you close the tab with changes not yet saved there.</p>
     </section>
   </div>
 </div>
@@ -972,7 +990,7 @@ async function openFile(file) {
     const d = fromYaml(await file.text());
     snapshot();
     doc = d; sel = null;
-    placeNodes(); store(); fit();
+    placeNodes(); store(); fit(); setServerDiagram(null);
     toast(`Opened ${file.name}: ${plural(doc.nodes.length, 'node')}, ${plural(doc.edges.length, 'edge')}.`);
     return true;
   } catch (e) { toast(e.message, true); return false; }
@@ -981,9 +999,91 @@ function newDiagram() {
   finishEdit();
   snapshot();
   doc = blank(); sel = null; view = { x: 0, y: 0, k: 1 };
-  changed();
+  changed(); setServerDiagram(null);
   toast('New diagram.');
 }
+/* ---------- optional server on the local network (mindmap_server.py) ---------- */
+// When the page comes from mindmap_server.py, the File menu also offers Open from server and Save to server.
+// The server keeps diagrams in one folder, so every device sees the same ones. Each save names the version it
+// replaces (its ETag), so a diagram changed on another device since it was opened here isn't overwritten unasked.
+// A link such as http://host:8765/diagram-editor.html?diagram=garden opens that diagram from the server.
+// While the diagram in this tab came from the server, the address bar links to it, Save to server (and Ctrl+S)
+// writes it back under the same name, and closing the tab with changes not yet saved to the server asks first.
+const serverTags = new Map();                      // diagram name -> ETag of the version last opened or saved here
+let serverDiagram = null;                          // { name, yaml } of the diagram from the server, as last opened or saved
+const serverReady = fetch('api/diagrams', { cache: 'no-store' })
+  .then(r => r.ok && /json/.test(r.headers.get('Content-Type') || '') ? r.json() : null)
+  .then(list => {
+    const ok = Array.isArray(list);
+    if (ok) $('#bServerOpen').hidden = $('#bServerSave').hidden = false;
+    return ok;
+  })
+  .catch(() => false);                             // no server: the commands stay hidden
+function setServerDiagram(name, tag) {
+  if (name) serverTags.set(name, tag);
+  serverDiagram = name ? { name, yaml: toYaml() } : null;
+  document.body.classList.toggle('server-file', !!name);
+  if (name || /[?&]diagram=/.test(location.search))
+    try { history.replaceState(null, '', name ? '?diagram=' + name : location.pathname); } catch (e) {}
+}
+function hasUnsavedChanges() { return !!serverDiagram && (!!editing || toYaml() !== serverDiagram.yaml); }
+addEventListener('beforeunload', e => { if (hasUnsavedChanges()) { e.preventDefault(); e.returnValue = ''; } });
+async function serverSave() {
+  if (!libsReady()) return;
+  finishEdit();
+  const name = serverDiagram ? serverDiagram.name : slug(doc.title) || 'diagram', tag = serverTags.get(name);
+  const body = new Blob([toYaml()], { type: 'application/yaml' });
+  const put = headers => fetch(`api/diagrams/${name}.yaml`, { method: 'PUT', body, headers });
+  try {
+    let r = await put(tag ? { 'If-Match': tag } : { 'If-None-Match': '*' });
+    if (r.status === 409) {
+      const q = tag ? `${name} has changed on the server since you opened it here, perhaps on another device. Save anyway, replacing that version?`
+                    : `A diagram called ${name} is already on the server. Replace it with this one?`;
+      if (!confirm(q)) { toast(`Not saved: ${name} on the server is unchanged.`, true); return; }
+      r = await put({});
+    }
+    if (!r.ok) throw new Error(`the server answered ${r.status}.`);
+    setServerDiagram(name, r.headers.get('ETag'));
+    toast(`Saved ${name} to the server.`);
+  } catch (e) { toast('Save to server failed: ' + e.message, true); }
+}
+async function serverOpen() {
+  let found;
+  try { found = await (await fetch('api/diagrams', { cache: 'no-store' })).json(); }
+  catch (e) { toast('Could not reach the server: ' + e.message, true); return; }
+  const list = $('#serverList');
+  list.replaceChildren(...found.map(d => {
+    const b = document.createElement('button'), when = document.createElement('small');
+    b.dataset.name = d.name; b.append(d.name);
+    when.textContent = new Date(d.modified * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    b.append(when);
+    return b;
+  }));
+  if (!found.length) {
+    const p = document.createElement('p');
+    p.textContent = 'No diagrams on the server yet. Save to server puts the current diagram there.';
+    list.append(p);
+  }
+  $('#serverFiles').showModal();
+}
+$('#serverList').addEventListener('click', e => {
+  const b = e.target.closest('button[data-name]');
+  if (!b) return;
+  $('#serverFiles').close();
+  openServerDiagram(b.dataset.name);
+});
+$('#serverFiles').addEventListener('close', () => vp.focus({ preventScroll: true }));
+async function openServerDiagram(name) {
+  if (!libsReady()) return;
+  try {
+    const r = /^[a-z0-9_]+$/.test(name) ? await fetch(`api/diagrams/${name}.yaml`, { cache: 'no-store' }) : null;
+    if (!r || r.status === 404) { toast(`${name} is not on the server.`, true); return; }
+    if (!r.ok) throw new Error(`the server answered ${r.status}.`);
+    const tag = r.headers.get('ETag');
+    if (await openFile(new File([await r.text()], name + '.yaml'))) setServerDiagram(name, tag);
+  } catch (e) { toast(`Could not open ${name}: ` + e.message, true); }
+}
+
 $('#fileIn').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); });
 const main = $('main');
 main.addEventListener('dragover', e => { e.preventDefault(); main.classList.add('drop'); });
@@ -1005,7 +1105,7 @@ document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu')) 
 const openHelp = () => { $('#dlg').hidden = false; $('#hClose').focus(); };
 const closeHelp = () => { $('#dlg').hidden = true; vp.focus({ preventScroll: true }); };
 const commands = {
-  bNew: newDiagram, bOpen: () => $('#fileIn').click(), bSave: saveDiagram,
+  bNew: newDiagram, bOpen: () => $('#fileIn').click(), bSave: saveDiagram, bServerOpen: serverOpen, bServerSave: serverSave,
   bZoomIn: () => zoom(1.25), bZoomOut: () => zoom(0.8), bFit: fit,
   edgeAuto: () => { const ed = doc.edges[sel?.edge]; if (ed?.layout) { snapshot(); delete ed.layout; changed(); } },
   bNode: addNode, bConnect: () => setConnecting(!connecting), bEdit: editLabel, bDel: deleteSelected, bUndo: undo, bRedo: redo,
@@ -1017,7 +1117,7 @@ $('#dlg').addEventListener('pointerdown', e => { if (e.target === $('#dlg')) clo
 document.addEventListener('keydown', e => {
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
   if (e.key === 'Escape') { if (!$('#dlg').hidden) closeHelp(); else if (connecting) setConnecting(false); closeMenus(); return; }
-  if (ctrl && key === 's') { e.preventDefault(); return saveDiagram(); }
+  if (ctrl && key === 's') { e.preventDefault(); closeMenus(); return serverDiagram ? serverSave() : saveDiagram(); }
   if (ctrl && key === 'o') { e.preventDefault(); return $('#fileIn').click(); }
   if (e.target.closest('input, textarea, select') || !$('#dlg').hidden) return;
   if (ctrl && key === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
@@ -1030,6 +1130,10 @@ document.addEventListener('keydown', e => {
 
 placeNodes();
 fit();
+serverReady.then(ok => {                           // a link such as ?diagram=garden opens that diagram from the server
+  const linked = new URLSearchParams(location.search).get('diagram');
+  if (ok && linked) openServerDiagram(linked);
+});
 window.addEventListener('resize', render);
 </script>
 </body>

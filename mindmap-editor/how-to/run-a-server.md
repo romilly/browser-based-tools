@@ -6,7 +6,7 @@ title: Share maps between your devices with a server
 
 The Mind Map Editor normally keeps your map in one browser. If you run the small mind map server on a computer on your home network, such as a Raspberry Pi, every phone, tablet and computer on that network can open and save the same maps.
 
-The server is [`mindmap_server.py`](../../mindmap_server.py). It needs only Python 3, with nothing to install. It serves the editor and keeps your maps as `.zip` files in one folder.
+The server is [`mindmap_server.py`](../../mindmap_server.py). It needs only Python 3, with nothing to install. It serves the editor and keeps your maps as `.zip` files in one folder. It also serves the [Diagram Editor](#diagrams), and keeps diagrams in a folder of their own.
 
 **There is no password.** Anyone who can reach the server can read and change the maps, so run it only on a network you trust. To use it away from home, put the server and your devices on a private network such as [Tailscale](https://tailscale.com/) rather than opening it to the internet.
 
@@ -19,7 +19,7 @@ git clone https://github.com/romilly/browser-based-tools.git
 cd browser-based-tools
 ```
 
-The server needs `mindmap_server.py` and `mindmap-editor.html` side by side, as they are in the repository. It uses only Python's standard library, so there is nothing to install: you don't need a virtual environment or `pip`. (The packages in `requirements-dev.txt` are only for running the tests.)
+The server needs `mindmap_server.py` and `mindmap-editor.html` side by side, as they are in the repository, with `diagram-editor.html` beside them for diagrams. It uses only Python's standard library, so there is nothing to install: you don't need a virtual environment or `pip`. (The packages in `requirements-dev.txt` are only for running the tests.)
 
 ## Run the server
 
@@ -29,7 +29,7 @@ In the repository folder, run [`start-mmserver.py`](../../start-mmserver.py):
 python3 start-mmserver.py
 ```
 
-It prints `Serving on port 8765; Ctrl+C to stop` and keeps running until you press Ctrl+C.
+It prints `Serving on port 8765: mind maps at /, diagrams at /diagram-editor.html; Ctrl+C to stop` and keeps running until you press Ctrl+C.
 
 Then, on any device on the network, browse to `http://<server name or address>:8765/`, for example `http://raspberrypi.local:8765/`. The **File** menu now has **Open from server…** and **Save to server**.
 
@@ -40,7 +40,9 @@ The maps are kept in `~/mindmaps`, which is created if it doesn't exist. To chan
 - the folder for the maps;
 - `port=8765`, the port to listen on;
 - `host='0.0.0.0'`, which accepts connections from the whole network. Use `'127.0.0.1'` for this computer only;
-- `editor=`, the path of `mindmap-editor.html`, if it isn't beside `mindmap_server.py`.
+- `editor=`, the path of `mindmap-editor.html`, if it isn't beside `mindmap_server.py`;
+- `diagrams=`, the folder for the diagrams. By default it is a `diagrams` folder inside the maps folder, made when the first diagram is saved;
+- `diagram_editor=`, the path of `diagram-editor.html`, if it isn't beside `mindmap_server.py`.
 
 For example: `start_mind_map_server('~/maps', port=8080)`.
 
@@ -135,8 +137,18 @@ A link to a map that isn't on the server says so, and leaves the current map as 
 
 Each save names the version it replaces. If someone saved the map on another device after you opened it, **Save to server** asks before replacing their version. It also asks before a new map replaces one of the same name already on the server.
 
+## Diagrams
+
+The same server serves the Diagram Editor at `http://<server name or address>:8765/diagram-editor.html`. Its **File** menu has **Open from server…** and **Save to server** too, and everything above works the same way for diagrams:
+
+- Each diagram has its own address, with `?diagram=` and its name, for example `http://raspberrypi.local:8765/diagram-editor.html?diagram=order_handling`.
+- **Ctrl+S** saves a diagram from the server back under the same name, even if you change its title.
+- The browser asks before you leave with changes not saved to the server, and **Save to server** asks before replacing a version saved on another device.
+
+Diagrams are kept as `.yaml` files in the `diagrams` folder inside the maps folder (`~/mindmaps/diagrams` unless you changed it). Maps and diagrams are listed separately, so a map and a diagram can have the same name.
+
 ## Backing up
 
-The maps are ordinary `.zip` files in the server's folder (`~/mindmaps` unless you changed it), so back up that folder. Each file opens in the editor with **Open**, as well as from the server.
+The maps are ordinary `.zip` files in the server's folder (`~/mindmaps` unless you changed it), and the diagrams are `.yaml` files in its `diagrams` folder, so back up that folder. Each file opens in its editor with **Open**, as well as from the server.
 
 [Mind Map Editor](../index.md)
