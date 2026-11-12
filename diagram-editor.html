@@ -76,6 +76,11 @@ main{flex:1;display:flex;min-height:0}
 .edge{fill:none;stroke:var(--edge);stroke-width:1.5}
 #canvas.connecting, #canvas.connecting .node{cursor:crosshair}
 .node.source .shape{stroke:var(--accent);stroke-width:2.2;stroke-dasharray:5 3}
+.handle .guide{stroke:var(--accent);stroke-width:1;stroke-dasharray:3 3;pointer-events:none}
+.handle .dot{fill:var(--canvas);stroke:var(--accent);stroke-width:2}
+.handle .hhit{fill:transparent;cursor:move}
+.port{cursor:move}
+#canvas.connecting .port{cursor:crosshair}
 .rubber{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-dasharray:6 4;pointer-events:none}
 .edge.sel{stroke:var(--accent);stroke-width:2.4}
 .ehit{fill:none;stroke:transparent;stroke-width:14;cursor:pointer}
@@ -99,6 +104,7 @@ aside input{font:14px var(--ui);color:var(--fg);background:var(--canvas);border:
 aside p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
 aside code{font:12.5px var(--mono);color:var(--fg)}
 .pane{display:flex;flex-direction:column;gap:8px}
+#edgeAuto{align-self:flex-start}
 #portList{display:flex;flex-direction:column;gap:4px}
 .prow{display:grid;grid-template-columns:2.2em minmax(0,1fr) minmax(0,1fr) auto;gap:4px;align-items:center}
 .prow span{font:11px var(--mono);color:var(--muted)}
@@ -191,7 +197,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
 
 <main>
   <div id="vp" tabindex="0">
-    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" aria-label="Diagram"><g id="view"><g id="edgeLayer"></g><g id="nodeLayer"></g><path id="rubber" class="rubber"/></g></svg>
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" aria-label="Diagram"><g id="view"><g id="edgeLayer"></g><g id="nodeLayer"></g><g id="handleLayer"></g><g id="labelLayer"></g><path id="rubber" class="rubber"/></g></svg>
     <div id="empty">An empty diagram. Press <b>&nbsp;Node&nbsp;</b> to add a node, or open a file from the File menu.</div>
   </div>
   <aside>
@@ -218,6 +224,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <p><code id="selEdge"></code></p>
       <label for="edgeLabel">Label</label>
       <input id="edgeLabel" placeholder="Optional label" autocomplete="off">
+      <button id="edgeAuto" title="Forget the bends and draw the edge with the curve the editor chooses">Automatic curve</button>
     </div>
   </aside>
 </main>
@@ -234,6 +241,8 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <dl class="keys">
         <dt>Click or tap</dt><dd>Select a node or an edge.</dd>
         <dt>Drag a node</dt><dd>Move it. Its edges follow.</dd>
+        <dt>Drag a port</dt><dd>Move it along the node's border, or round to another side.</dd>
+        <dt>Selected edge</dt><dd>Drag either of its two handles to bend it. <b>Automatic curve</b> in the panel straightens it out again.</dd>
         <dt>Connect</dt><dd>Then drag from one node to another, or tap one and then the other, to draw an edge between them. The edge leaves the first node from an output port where you started and enters the second at an input port where you finished; starting or finishing on an existing port uses it. Connect stays on until you press it again or <kbd>Esc</kbd>, and while it is on, dragging never moves a node.</dd>
         <dt>Double-click or tap</dt><dd>Edit a node's label.</dd>
         <dt>Drag empty space</dt><dd>Move around the diagram.</dd>
@@ -412,7 +421,7 @@ function portAt(end, dir) {
 function curveOf(e) {
   const a = portAt(e.from, 'out'), b = portAt(e.to, 'in');
   if (e.layout?.curve) return [[a.x, a.y], e.layout.curve[0], e.layout.curve[1], [b.x, b.y]];
-  const d = Math.min(120, Math.max(30, Math.hypot(b.x - a.x, b.y - a.y) / 2));
+  const d = Math.min(120, Math.max(30, Math.hypot(b.x - a.x, b.y - a.y) * 0.4));   // so the handles of a straight edge stay apart
   const [ax, ay] = NORMAL[a.side], [bx, by] = NORMAL[b.side];
   return [[a.x, a.y], [a.x + ax * d, a.y + ay * d], [b.x + bx * d, b.y + by * d], [b.x, b.y]];
 }
@@ -487,6 +496,8 @@ function render() {
       el('title', {}, c).textContent = `${p.dir === 'in' ? 'Input' : 'Output'} ${p.name}` + (p.type ? `: ${p.type}` : '');
     }
   }
+  const handleLayer = $('#handleLayer'), labelLayer = $('#labelLayer');      // labels go on top, so a click on one always reaches it
+  handleLayer.replaceChildren(); labelLayer.replaceChildren();
   doc.edges.forEach((e, i) => {
     const c = curveOf(e), d = `M${c[0]} C${c[1]} ${c[2]} ${c[3]}`, on = sel?.edge === i ? ' sel' : '';
     const g = el('g', { 'data-edge': i }, edgeLayer);
@@ -499,10 +510,17 @@ function render() {
       const bx = tip[0] - dx * 10, by = tip[1] - dy * 10;
       el('path', { class: 'arrow' + on, d: `M${tip} L${bx - dy * 4.5},${by + dx * 4.5} L${bx + dy * 4.5},${by - dx * 4.5}Z` }, g);
     }
+    const lg = el('g', { 'data-edge': i }, labelLayer);
     for (const [text, t, cls] of [[e.label, 0.5, 'elabel' + on], [e.from_label, 0.15, 'endlabel'], [e.to_label, 0.85, 'endlabel']]) {
       if (!text) continue;
       const [x, y] = along(c, t);
-      el('text', { class: cls, x, y: y - 5 }, g).textContent = text;
+      el('text', { class: cls, x, y: y - 5 }, lg).textContent = text;
+    }
+    if (on) for (const h of [0, 1]) {            // the selected edge's control points, with a line to the end each one shapes
+      const [x, y] = c[h + 1], end = c[h * 3], hg = el('g', { class: 'handle', 'data-h': h }, handleLayer);
+      el('path', { class: 'guide', d: `M${end} L${x},${y}` }, hg);
+      el('circle', { class: 'hhit', cx: x, cy: y, r: 11 / view.k }, hg);
+      el('circle', { class: 'dot', cx: x, cy: y, r: 5 / view.k }, hg);
     }
   });
   updatePanel();
@@ -516,7 +534,7 @@ function updatePanel() {
     $('#selId').textContent = n.id; setValue($('#type'), n.type);
     updatePorts(n);
   }
-  if (e) { $('#selEdge').textContent = `${e.from} → ${e.to}`; setValue($('#edgeLabel'), e.label); }
+  if (e) { $('#selEdge').textContent = `${e.from} → ${e.to}`; setValue($('#edgeLabel'), e.label); $('#edgeAuto').disabled = !e.layout?.curve; }
   $('#bUndo').disabled = !undoStack.length; $('#bRedo').disabled = !redoStack.length;
   $('#bEdit').disabled = !n; $('#bDel').disabled = !(n || e);
 }
@@ -700,15 +718,20 @@ function hitAt(cx, cy, dir) {
   const p = t.closest('.port');
   return { node: g.dataset.id, port: p && p.dataset.dir === dir ? p.dataset.port : null, point: toDiagram(cx, cy) };
 }
+// Where on a node's border a port goes for a point in the diagram: the nearest side, and how far along it
+// (in steps of 0.05, and not right at a corner).
+function borderAt(n, point) {
+  const { w, h } = size(n), x = point[0] - n.layout.x, y = point[1] - n.layout.y;
+  const side = Object.entries({ left: x, right: w - x, top: y, bottom: h - y }).sort((a, b) => a[1] - b[1])[0][0];
+  const along = side === 'left' || side === 'right' ? y / h : x / w;
+  return { side, at: Math.min(0.95, Math.max(0.05, Math.round(along * 20) / 20)) };
+}
 function portFor(n, dir, hit) {
   if (hit.port) return hit.port;
   const list = portsOf(n, dir);
   let i = 1;
   while (list.some(p => p.name === dir + i)) i++;
-  const { w, h } = size(n), x = hit.point[0] - n.layout.x, y = hit.point[1] - n.layout.y;
-  const side = Object.entries({ left: x, right: w - x, top: y, bottom: h - y }).sort((a, b) => a[1] - b[1])[0][0];
-  const along = side === 'left' || side === 'right' ? y / h : x / w;
-  list.push({ name: dir + i, layout: { side, at: Math.min(0.95, Math.max(0.05, Math.round(along * 20) / 20)) } });
+  list.push({ name: dir + i, layout: borderAt(n, hit.point) });
   return dir + i;
 }
 function connect(from, to) {
@@ -740,6 +763,12 @@ svg.addEventListener('pointerdown', e => {
   fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (fingers.size === 2) { drag = null; pinch = pinchState(); capture(e); return; }
   const node = e.target.closest('g.node'), edge = e.target.closest('g[data-edge]'), slop = e.pointerType === 'touch' ? 8 : 4;
+  const handle = e.target.closest('.handle'), port = e.target.closest('.port');
+  if (handle && sel?.edge != null) {
+    drag = { handle: +handle.dataset.h, edge: doc.edges[sel.edge], x: e.clientX, y: e.clientY, moved: false, slop };
+    capture(e);
+    return vp.focus({ preventScroll: true });
+  }
   if (connecting && node) {
     drag = { connect: hitAt(e.clientX, e.clientY, 'out'), x: e.clientX, y: e.clientY, moved: false, slop };
     capture(e);
@@ -748,7 +777,11 @@ svg.addEventListener('pointerdown', e => {
   if (node) {
     const n = nodeById(node.dataset.id);
     sel = { node: n.id };
-    drag = { node: n, x: e.clientX, y: e.clientY, from: { ...n.layout }, moved: false, slop };
+    drag = { node: n, x: e.clientX, y: e.clientY, from: { ...n.layout }, moved: false, slop,
+             port: port && portsOf(n, port.dataset.dir).find(p => p.name === port.dataset.port),
+             // bent edges at this node: the control point next to it moves with the node
+             bent: doc.edges.filter(e => e.layout?.curve && (endNode(e.from) === n.id || endNode(e.to) === n.id))
+               .map(e => ({ e, curve: e.layout.curve.map(p => [...p]), ends: [endNode(e.from) === n.id, endNode(e.to) === n.id] })) };
   } else if (edge) { sel = { edge: +edge.dataset.edge }; drag = null; }
   else { sel = null; source = null; drag = { pan: true, x: e.clientX, y: e.clientY, from: { ...view }, moved: false, slop }; }
   if (drag) capture(e);
@@ -768,10 +801,23 @@ svg.addEventListener('pointermove', e => {
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (!drag.moved && Math.hypot(dx, dy) < drag.slop) return;
   if (drag.connect) { drag.moved = true; showRubber(drag.connect.point, toDiagram(e.clientX, e.clientY)); return; }
+  if (drag.handle != null || drag.port) {
+    if (!drag.moved) snapshot();
+    drag.moved = true;
+    const point = toDiagram(e.clientX, e.clientY).map(Math.round);
+    if (drag.port) drag.port.layout = borderAt(drag.node, point);
+    else {
+      const ed = drag.edge, c = curveOf(ed);
+      ed.layout = { curve: (ed.layout?.curve || [c[1], c[2]].map(p => p.map(Math.round))).map((p, i) => i === drag.handle ? point : p) };
+    }
+    return render();
+  }
   if (drag.pan) { view.x = drag.from.x + dx; view.y = drag.from.y + dy; svg.classList.add('panning'); }
   else {
     if (!drag.moved) snapshot();
     drag.node.layout.x = Math.round(drag.from.x + dx / view.k); drag.node.layout.y = Math.round(drag.from.y + dy / view.k);
+    const mx = drag.node.layout.x - drag.from.x, my = drag.node.layout.y - drag.from.y;
+    for (const { e, curve, ends } of drag.bent) e.layout.curve = curve.map(([x, y], i) => ends[i] ? [x + mx, y + my] : [x, y]);
   }
   drag.moved = true;
   render();
@@ -790,7 +836,7 @@ function endDrag(e) {
     source = source && target?.node === source.node ? null : d.connect;      // tapping the first node again lets it go
     return render();
   }
-  if (d.moved) { if (d.node) store(); return; }
+  if (d.moved) { if (d.node || d.handle != null) store(); return; }
   if (d.node) {                                           // a tap: a second one soon after edits the label
     const now = Date.now();
     if (lastTap.id === d.node.id && now - lastTap.time < 400) { lastTap = { id: null, time: 0 }; editLabel(); }
@@ -886,6 +932,7 @@ const closeHelp = () => { $('#dlg').hidden = true; vp.focus({ preventScroll: tru
 const commands = {
   bNew: newDiagram, bOpen: () => $('#fileIn').click(), bSave: saveDiagram,
   bZoomIn: () => zoom(1.25), bZoomOut: () => zoom(0.8), bFit: fit,
+  edgeAuto: () => { const ed = doc.edges[sel?.edge]; if (ed?.layout) { snapshot(); delete ed.layout; changed(); } },
   bNode: addNode, bConnect: () => setConnecting(!connecting), bEdit: editLabel, bDel: deleteSelected, bUndo: undo, bRedo: redo,
   bHelp: openHelp, hClose: closeHelp,
 };

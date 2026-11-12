@@ -603,3 +603,97 @@ def test_deleting_a_port_deletes_its_edges(dg):
     assert ['read_zip.yaml', 'check.yaml'] not in dg.edges() and len(dg.edges()) == 11
     dg.page.click('#bUndo')
     assert dg.ports('read_zip', 'out') == ['yaml', 'images'] and len(dg.edges()) == 12
+
+
+# --- bending edges and moving ports ---
+
+JOINED = """diagram:
+  title: Joined
+  nodes:
+    a:
+      label: A
+      outputs:
+        out1: {}
+      layout: {x: 0, y: 0, w: 100, h: 60}
+    b:
+      label: B
+      inputs:
+        in1: {}
+      layout: {x: 300, y: 0, w: 100, h: 60}
+  edges:
+    - {from: a.out1, to: b.in1, label: feeds}
+"""
+
+
+@pytest.fixture
+def joined(dg, tmp_path):
+    path = tmp_path / 'joined.yaml'
+    path.write_text(JOINED)
+    dg.open(path)
+    return dg
+
+
+def scale(dg):
+    return dg.box('a')['width'] / 100
+
+
+def centre(locator):
+    b = locator.bounding_box()
+    return b['x'] + b['width'] / 2, b['y'] + b['height'] / 2
+
+
+def nudge(dg, start, dx, dy):
+    """Drag from a screen point by (dx, dy) in diagram units."""
+    k = scale(dg)
+    drag(dg, start, (start[0] + dx * k, start[1] + dy * k))
+
+
+def handles(dg):
+    return dg.page.locator('#handleLayer .handle .dot')
+
+
+def test_a_selected_edge_has_two_handles_that_bend_its_curve(joined, tmp_path):
+    assert handles(joined).count() == 0
+    joined.page.locator('#canvas .elabel').click()
+    assert handles(joined).count() == 2
+    path = joined.page.locator('#canvas path.edge').get_attribute('d')
+    nudge(joined, centre(handles(joined).nth(0)), 0, 80)
+    assert joined.page.locator('#canvas path.edge').get_attribute('d') != path
+    edge = joined.saved(tmp_path)['diagram']['edges'][0]
+    assert edge['layout']['curve'] == [[180, pytest.approx(110, abs=1)], [220, 30]]   # the other stays where it was drawn
+    joined.page.click('#bUndo')
+    assert 'layout' not in joined.saved(tmp_path / 'undone')['diagram']['edges'][0]
+
+
+def test_automatic_curve_puts_an_edge_back_to_the_curve_the_editor_draws(joined, tmp_path):
+    joined.page.locator('#canvas .elabel').click()
+    assert joined.page.locator('#edgeAuto').is_disabled()
+    nudge(joined, centre(handles(joined).nth(1)), 0, -50)
+    joined.page.click('#edgeAuto')
+    assert 'layout' not in joined.saved(tmp_path)['diagram']['edges'][0]
+    assert joined.page.locator('#edgeAuto').is_disabled()
+
+
+def test_moving_a_node_takes_the_near_end_of_a_bent_curve_with_it(joined, tmp_path):
+    joined.page.locator('#canvas .elabel').click()
+    nudge(joined, centre(handles(joined).nth(0)), 0, 80)
+    nudge(joined, at(joined, 'b', 0.5, 0.5), 50, 20)
+    edge = joined.saved(tmp_path)['diagram']['edges'][0]
+    assert edge['layout']['curve'] == [[180, pytest.approx(110, abs=1)], [pytest.approx(270, abs=1), pytest.approx(50, abs=1)]]
+
+
+def test_dragging_a_port_moves_it_around_the_node_and_the_edge_follows(joined, tmp_path):
+    before = centre(joined.node('a').locator('.shape'))
+    nudge(joined, joined.port_centre('a', 'out', 'out1'), -50, 30)    # from the right side to the middle of the bottom
+    assert centre(joined.node('a').locator('.shape')) == pytest.approx(before, abs=0.5)
+    nodes = joined.saved(tmp_path)['diagram']['nodes']
+    assert nodes['a']['outputs'] == {'out1': {'layout': {'side': 'bottom', 'at': 0.5}}}
+    assert nodes['a']['layout'] == {'x': 0, 'y': 0, 'w': 100, 'h': 60}
+    assert joined.edges() == [['a.out1', 'b.in1']]
+    joined.page.keyboard.press('Control+z')
+    assert 'layout' not in joined.saved(tmp_path / 'undone')['diagram']['nodes']['a']['outputs']['out1']
+
+
+def test_tapping_a_port_selects_its_node(joined):
+    joined.page.mouse.click(*joined.port_centre('b', 'in', 'in1'))
+    assert joined.page.text_content('#selId') == 'b'
