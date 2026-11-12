@@ -1,0 +1,68 @@
+diagram:
+  title: Opening a file
+  kind: flowchart
+  nodes:
+    start:
+      type: start
+      label: File chosen
+      outputs:
+        out1: {}
+    is_zip:
+      type: decision
+      label: Is it a zip?
+      inputs:
+        in1: {}
+      outputs:
+        'yes': {}
+        'no': {}
+    unzip:
+      type: step
+      label: Find the YAML in the zip
+      inputs:
+        in1: {}
+      outputs:
+        out1: {}
+    parse:
+      type: step
+      label: Parse and check
+      inputs:
+        in1: {}
+      outputs:
+        out1: {}
+    valid:
+      type: decision
+      label: Valid?
+      inputs:
+        in1: {}
+      outputs:
+        'yes': {}
+        'no': {}
+    replace:
+      type: step
+      label: Replace the map
+      inputs:
+        in1: {}
+      outputs:
+        out1: {}
+    message:
+      type: step
+      label: Show a message
+      inputs:
+        in1: {}
+      outputs:
+        out1: {}
+    done:
+      type: end
+      label: Done
+      inputs:
+        in1: {}
+  edges:
+    - {from: start.out1, to: is_zip.in1}
+    - {from: is_zip.yes, to: unzip.in1, label: 'yes'}
+    - {from: is_zip.no, to: parse.in1, label: 'no'}
+    - {from: unzip.out1, to: parse.in1}
+    - {from: parse.out1, to: valid.in1}
+    - {from: valid.yes, to: replace.in1, label: 'yes'}
+    - {from: valid.no, to: message.in1, label: 'no'}
+    - {from: replace.out1, to: done.in1}
+    - {from: message.out1, to: done.in1}

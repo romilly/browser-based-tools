@@ -1,0 +1,313 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Diagram Schema",
+  "description": "Schema for the Diagram Editor's YAML format (diagram-editor.html). A diagram is a set of typed nodes with named input and output ports, and edges that each join an output port to an input port. It is meant to be read by programs that generate code or run processes, so meaning and drawing are kept apart: everything about position, size and shape is in a 'layout' block (on a node, a port or an edge), which such a program can ignore. Three rules can't be checked by this schema: every edge's 'from' must name an output port of a node in the diagram, every edge's 'to' must name an input port, and node ids and port names must be unique (YAML parsers reject duplicate keys). An image path should also name a file in the same zip.",
+  "definitions": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_]+$"
+    },
+    "port": {
+      "type": "object",
+      "description": "A port: a named point on a node where edges attach. Write {} for a port with nothing to say about it",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The type of data that passes through the port, such as 'text' or 'zip'. Any name; the editor shows it but doesn't interpret it"
+        },
+        "layout": {
+          "type": "object",
+          "description": "Where the port is drawn on the node's border. Without it, inputs are spaced down the left side and outputs down the right",
+          "properties": {
+            "side": {
+              "enum": ["left", "right", "top", "bottom"]
+            },
+            "at": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far along the side: 0 is its top or left end, 1 its bottom or right end. Without it, the ports on a side are spaced evenly"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "ports": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9_]+$": {
+          "$ref": "#/definitions/port"
+        }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "description": "A node: a box on the diagram, with optional ports",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "What kind of thing the node is, such as 'process', 'store' or 'decision'. Any name: the editor draws the types it knows with their own shapes and any other as a rectangle"
+        },
+        "label": {
+          "type": "string",
+          "description": "The text shown on the node. May contain line breaks. Must be a string: quote values YAML would read as numbers, booleans, dates or null"
+        },
+        "inputs": {
+          "$ref": "#/definitions/ports",
+          "description": "Input ports by name, in display order. An edge's 'to' names one of these"
+        },
+        "outputs": {
+          "$ref": "#/definitions/ports",
+          "description": "Output ports by name, in display order. An edge's 'from' names one of these. An output may have the same name as an input"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Anything else a program reading the diagram needs to know about the node. The editor keeps it but doesn't interpret it"
+        },
+        "note": {
+          "type": "string",
+          "description": "A note attached to the node, in Markdown (GitHub-flavoured), with LaTeX maths between $...$ or $$...$$, as in the Mind Map Editor. Write notes as YAML block scalars (|)"
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\\\]+\\.([pP][nN][gG]|[jJ][pP][eE]?[gG])$",
+          "description": "A PNG or JPEG image shown on the node: the path of the image file inside the saved zip, relative to the YAML file. Use '/' between folders; no leading '/' and no '..'"
+        },
+        "layout": {
+          "type": "object",
+          "description": "Where the node is drawn. Without it, the editor places the node itself when it opens the file",
+          "required": ["x", "y"],
+          "properties": {
+            "x": {
+              "type": "number",
+              "description": "The left edge of the node"
+            },
+            "y": {
+              "type": "number",
+              "description": "The top edge of the node; y increases downwards"
+            },
+            "w": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Width. Without it, the node is sized to fit its label"
+            },
+            "h": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Height. Without it, the node is sized to fit its label"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "A point as [x, y]"
+    },
+    "edge": {
+      "type": "object",
+      "description": "An edge: a line from an output port to an input port",
+      "required": ["from", "to"],
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$",
+          "description": "Where the edge starts: a node id, a dot, and the name of one of that node's outputs, such as 'read_zip.yaml'"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+$",
+          "description": "Where the edge ends: a node id, a dot, and the name of one of that node's inputs, such as 'check.yaml'. It may be a port of the node the edge starts from"
+        },
+        "type": {
+          "type": "string",
+          "description": "What kind of connection the edge is, such as 'inherits' or 'association'. Any name; a program should read meaning from this and 'properties', not from the decorations"
+        },
+        "label": {
+          "type": "string",
+          "description": "Text shown at the middle of the edge"
+        },
+        "from_label": {
+          "type": "string",
+          "description": "Text shown at the start of the edge, such as a role name or '0..*'"
+        },
+        "to_label": {
+          "type": "string",
+          "description": "Text shown at the end of the edge"
+        },
+        "from_end": {
+          "type": "string",
+          "description": "The decoration drawn at the start of the edge: 'none' (the default), 'arrow', 'triangle', 'diamond', 'filled_diamond', 'one', 'many', 'zero_or_one', 'zero_or_many' or 'one_or_many'. The editor keeps any other name and draws it as an arrow"
+        },
+        "to_end": {
+          "type": "string",
+          "description": "The decoration drawn at the end of the edge, from the same names. The default is 'arrow'"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Anything else a program reading the diagram needs to know about the edge. The editor keeps it but doesn't interpret it"
+        },
+        "layout": {
+          "type": "object",
+          "description": "How the edge is drawn. Without it, the editor chooses a curve itself",
+          "properties": {
+            "curve": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/point"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "The two control points of a cubic Bézier curve from the 'from' port to the 'to' port"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": ["diagram"],
+  "properties": {
+    "diagram": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The diagram's name. The editor names saved files after it"
+        },
+        "kind": {
+          "type": "string",
+          "description": "What kind of diagram this is, such as 'dataflow', 'flowchart', 'er' or 'class'. Any name; it tells the editor which node types to offer and a program which rules apply"
+        },
+        "note": {
+          "type": "string",
+          "description": "A note about the whole diagram, in Markdown"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Anything else a program reading the diagram needs to know about it as a whole"
+        },
+        "nodes": {
+          "type": "object",
+          "description": "The nodes by id. Each id names its node for the life of the diagram and forms part of edge ends; the editor makes one from the label when the node is created (lower case, each run of other characters replaced by '_', trimmed, cut to 40 characters, 'node' if empty, with _2, _3 ... added to repeats) and does not change it when the label changes. Later nodes are drawn on top of earlier ones",
+          "patternProperties": {
+            "^[a-zA-Z0-9_]+$": {
+              "$ref": "#/definitions/node"
+            }
+          },
+          "additionalProperties": false
+        },
+        "edges": {
+          "type": "array",
+          "description": "The edges, in drawing order",
+          "items": {
+            "$ref": "#/definitions/edge"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "diagram": {
+        "title": "New diagram"
+      }
+    },
+    {
+      "diagram": {
+        "title": "Orders",
+        "kind": "er",
+        "note": "A customer places **orders**.\n",
+        "properties": {
+          "database": "shop"
+        },
+        "nodes": {
+          "customer": {
+            "type": "entity",
+            "label": "Customer",
+            "inputs": {
+              "id": {
+                "type": "integer",
+                "layout": {
+                  "side": "left",
+                  "at": 0.25
+                }
+              }
+            },
+            "properties": {
+              "table": "customers"
+            },
+            "note": "One row per customer.\n",
+            "image": "images/customer.png",
+            "layout": {
+              "x": 40,
+              "y": 40,
+              "w": 140,
+              "h": 80
+            }
+          },
+          "order": {
+            "type": "entity",
+            "label": "Order",
+            "outputs": {
+              "customer_id": {
+                "type": "integer",
+                "layout": {
+                  "side": "left"
+                }
+              },
+              "next": {}
+            },
+            "inputs": {
+              "previous": {}
+            },
+            "layout": {
+              "x": 320,
+              "y": 40
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "order.customer_id",
+            "to": "customer.id",
+            "type": "association",
+            "label": "placed by",
+            "from_label": "0..*",
+            "to_label": "1",
+            "from_end": "many",
+            "to_end": "one",
+            "properties": {
+              "on_delete": "cascade"
+            },
+            "layout": {
+              "curve": [
+                [260, 60],
+                [240, 60]
+              ]
+            }
+          },
+          {
+            "from": "order.next",
+            "to": "order.previous"
+          }
+        ]
+      }
+    }
+  ]
+}

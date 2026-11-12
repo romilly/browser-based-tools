@@ -1,0 +1,104 @@
+diagram:
+  title: Mind map data flow
+  kind: dataflow
+  note: |
+    How a map moves between the user, the browser and saved files in the **Mind Map Editor**.
+  nodes:
+    user:
+      type: external
+      label: User
+      inputs:
+        message: {type: text, layout: {side: bottom}}
+      outputs:
+        actions: {type: events}
+      layout: {x: 40, y: 160, w: 140, h: 60}
+    edit:
+      type: process
+      label: Edit map
+      inputs:
+        actions: {type: events}
+      outputs:
+        map: {type: map}
+      layout: {x: 260, y: 160, w: 140, h: 60}
+    map:
+      type: store
+      label: Map in memory
+      inputs:
+        map: {type: map}
+        opened: {type: map, layout: {side: bottom}}
+      outputs:
+        map: {type: map}
+        autosave: {type: map, layout: {side: top}}
+      layout: {x: 480, y: 160, w: 140, h: 60}
+    browser_storage:
+      type: store
+      label: Browser storage
+      inputs:
+        map: {type: map, layout: {side: bottom}}
+      note: |
+        localStorage holds the map; IndexedDB holds the image bytes.
+      layout: {x: 480, y: 20, w: 140, h: 60}
+    build_zip:
+      type: process
+      label: Build zip
+      inputs:
+        map: {type: map}
+      outputs:
+        zip: {type: zip}
+      properties:
+        function: mapZip
+      layout: {x: 700, y: 160, w: 140, h: 60}
+    file:
+      type: external
+      label: File on disk
+      inputs:
+        save: {type: zip}
+      outputs:
+        open: {type: zip, layout: {side: bottom}}
+      layout: {x: 920, y: 80, w: 140, h: 60}
+    server:
+      type: external
+      label: Map server
+      inputs:
+        save: {type: zip}
+      outputs:
+        open: {type: zip, layout: {side: bottom}}
+      properties:
+        api: /api/maps
+      layout: {x: 920, y: 240, w: 140, h: 60}
+    read_zip:
+      type: process
+      label: Read zip
+      inputs:
+        zip: {type: zip, layout: {side: right}}
+      outputs:
+        yaml: {type: text, layout: {side: left, at: 0.3}}
+        images: {type: files, layout: {side: left, at: 0.7}}
+      layout: {x: 700, y: 360, w: 140, h: 60}
+    check:
+      type: process
+      label: Parse and check
+      inputs:
+        yaml: {type: text, layout: {side: right, at: 0.3}}
+        images: {type: files, layout: {side: right, at: 0.7}}
+      outputs:
+        map: {type: map, layout: {side: top}}
+        error: {type: text, layout: {side: left}}
+      layout: {x: 480, y: 360, w: 140, h: 60}
+  edges:
+    - {from: user.actions, to: edit.actions}
+    - {from: edit.map, to: map.map}
+    - {from: map.autosave, to: browser_storage.map}
+    - {from: map.map, to: build_zip.map}
+    - {from: build_zip.zip, to: file.save, label: Save}
+    - {from: build_zip.zip, to: server.save, label: Save to server}
+    - {from: file.open, to: read_zip.zip, label: Open}
+    - {from: server.open, to: read_zip.zip, label: Open from server}
+    - {from: read_zip.yaml, to: check.yaml}
+    - {from: read_zip.images, to: check.images}
+    - {from: check.map, to: map.opened}
+    - from: check.error
+      to: user.message
+      label: message
+      layout:
+        curve: [[300, 390], [110, 390]]
