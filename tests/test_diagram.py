@@ -425,7 +425,7 @@ def test_the_type_chosen_in_the_panel_changes_the_shape(dg, tmp_path):
 
 def test_the_toolbar_holds_only_commands_that_have_keys(dg):
     titles = dg.page.locator('#toolbar button').evaluate_all('bs => bs.map(b => b.title)')
-    assert len(titles) == 5 and all('(' in t for t in titles)
+    assert len(titles) == 6 and all('(' in t for t in titles)
 
 
 @pytest.mark.parametrize('width, height', [(390, 844), (844, 390), (1280, 720)], ids=['phone', 'phone on its side', 'desktop'])
@@ -468,3 +468,138 @@ def test_the_phone_header_has_two_tidy_rows(dg):
     assert top('#bNode') == top('#bEdit') == top('#bDel') > top('#mbFile') + 10
     assert dg.page.locator('header').bounding_box()['height'] < 80
     assert not dg.page.locator('header h1').is_visible()
+
+
+# --- drawing edges: Connect mode makes a port at each end, where the edge starts and ends ---
+
+TWO_NODES = """diagram:
+  title: Two
+  nodes:
+    a:
+      label: A
+      layout: {x: 0, y: 0, w: 100, h: 60}
+    b:
+      label: B
+      layout: {x: 300, y: 0, w: 100, h: 60}
+"""
+
+
+@pytest.fixture
+def two(dg, tmp_path):
+    path = tmp_path / 'two.yaml'
+    path.write_text(TWO_NODES)
+    dg.open(path)
+    return dg
+
+
+def at(dg, node_id, fx, fy):
+    """The screen point a fraction fx across and fy down a node's shape."""
+    b = dg.box(node_id)
+    return b['x'] + fx * b['width'], b['y'] + fy * b['height']
+
+
+def drag(dg, start, end):
+    dg.page.mouse.move(*start)
+    dg.page.mouse.down()
+    dg.page.mouse.move(*end, steps=6)
+    dg.page.mouse.up()
+
+
+def test_connect_draws_an_edge_by_dragging_and_makes_ports_where_it_starts_and_ends(two, tmp_path):
+    two.page.click('#bConnect')
+    assert two.page.get_attribute('#bConnect', 'aria-pressed') == 'true'
+    drag(two, at(two, 'a', 0.9, 0.5), at(two, 'b', 0.1, 0.5))
+    assert two.edges() == [['a.out1', 'b.in1']]
+    assert two.ports('a', 'out') == ['out1'] and two.ports('b', 'in') == ['in1']
+    data = two.saved(tmp_path)['diagram']
+    assert data['nodes']['a']['outputs'] == {'out1': {'layout': {'side': 'right', 'at': 0.5}}}
+    assert data['nodes']['b']['inputs'] == {'in1': {'layout': {'side': 'left', 'at': 0.5}}}
+    assert data['edges'] == [{'from': 'a.out1', 'to': 'b.in1'}]
+    assert data['nodes']['a']['layout'] == {'x': 0, 'y': 0, 'w': 100, 'h': 60}        # nothing moved
+
+
+def test_connect_works_with_two_taps_too(two):
+    two.page.keyboard.press('c')
+    two.page.mouse.click(*at(two, 'a', 0.5, 0.95))
+    assert 'source' in two.node('a').get_attribute('class')
+    two.page.mouse.click(*at(two, 'b', 0.5, 0.05))
+    assert two.edges() == [['a.out1', 'b.in1']]
+    sides = two.page.evaluate("""() => [...document.querySelectorAll('.port')].map(p => [p.dataset.port, +p.getAttribute('cy')])""")
+    assert sides == [['out1', 60], ['in1', 0]]                     # the bottom of A and the top of B
+
+
+def test_dropping_on_a_port_reuses_it(two):
+    two.page.keyboard.press('c')
+    drag(two, at(two, 'a', 0.9, 0.5), at(two, 'b', 0.1, 0.5))
+    out1, in1 = two.port_centre('a', 'out', 'out1'), two.port_centre('b', 'in', 'in1')
+    drag(two, out1, at(two, 'b', 0.5, 0.95))                      # from the same output to a new place on B
+    assert two.edges() == [['a.out1', 'b.in1'], ['a.out1', 'b.in2']]
+    drag(two, out1, in1)                                           # the same edge again
+    assert len(two.edges()) == 2 and 'already' in two.message()
+
+
+def test_in_connect_mode_a_drag_never_moves_a_node_and_escape_leaves_the_mode(two):
+    before = two.box('a')
+    two.page.keyboard.press('c')
+    drag(two, at(two, 'a', 0.5, 0.5), at(two, 'a', 0.5, 0.5)[0:1] + (before['y'] + 200,))   # dropped on empty space
+    assert two.box('a') == before and two.edges() == []
+    two.page.keyboard.press('Escape')
+    assert two.page.get_attribute('#bConnect', 'aria-pressed') == 'false'
+    drag(two, at(two, 'a', 0.5, 0.5), (before['x'] + before['width'] / 2, before['y'] + 130))
+    assert two.box('a')['y'] > before['y'] + 50
+
+
+def test_ports_are_renamed_and_typed_in_the_panel_and_edges_follow(two, tmp_path):
+    two.page.keyboard.press('c')
+    drag(two, at(two, 'a', 0.9, 0.5), at(two, 'b', 0.1, 0.5))
+    two.page.keyboard.press('Escape')
+    two.node('a').click()
+    name = two.page.locator('#portList [aria-label="Name of output out1"]')
+    name.fill('zip')
+    two.page.locator('#portList [aria-label="Data type of output zip"]').fill('bytes')
+    assert two.edges() == [['a.zip', 'b.in1']]
+    data = two.saved(tmp_path)['diagram']
+    assert data['nodes']['a']['outputs'] == {'zip': {'type': 'bytes', 'layout': {'side': 'right', 'at': 0.5}}}
+    two.page.click('#bUndo')                                       # one undo step for the whole visit to each box
+    two.page.click('#bUndo')
+    assert two.edges() == [['a.out1', 'b.in1']]
+
+
+@pytest.mark.parametrize('bad', ['two words', '', 'b-c'])
+def test_a_port_name_must_be_a_name_and_unique(two, bad):
+    two.page.keyboard.press('c')
+    drag(two, at(two, 'a', 0.9, 0.3), at(two, 'b', 0.1, 0.3))
+    drag(two, at(two, 'a', 0.9, 0.7), at(two, 'b', 0.1, 0.7))
+    two.page.keyboard.press('Escape')
+    two.node('a').click()
+    for name in (bad, 'out1'):                                     # not a name; then the other port's name
+        box = two.page.locator('#portList [aria-label="Name of output out2"]')
+        box.fill(name)
+        assert box.get_attribute('aria-invalid') == 'true'
+        assert two.edges() == [['a.out1', 'b.in1'], ['a.out2', 'b.in2']]
+    box.press('Enter')                                             # leaving the box puts the name back
+    assert box.input_value() == 'out2' and box.get_attribute('aria-invalid') is None
+
+
+def test_deleting_an_edge_removes_the_ports_it_made_but_not_ones_you_named(two):
+    two.page.keyboard.press('c')
+    drag(two, at(two, 'a', 0.9, 0.3), at(two, 'b', 0.1, 0.3))
+    drag(two, at(two, 'a', 0.9, 0.7), at(two, 'b', 0.1, 0.7))
+    two.page.keyboard.press('Escape')
+    two.node('a').click()
+    two.page.locator('#portList [aria-label="Name of output out2"]').fill('result')
+    for _ in range(2):
+        two.page.locator('#canvas g[data-edge="0"] .ehit').click(force=True)
+        two.page.keyboard.press('Delete')
+    assert two.edges() == []
+    assert two.ports('a', 'out') == ['result'] and two.ports('b', 'in') == []
+
+
+def test_deleting_a_port_deletes_its_edges(dg):
+    dg.open(DATA_FLOW)
+    dg.node('read_zip').click()
+    dg.page.click('#portList [aria-label="Delete output yaml"]')
+    assert dg.ports('read_zip', 'out') == ['images']
+    assert ['read_zip.yaml', 'check.yaml'] not in dg.edges() and len(dg.edges()) == 11
+    dg.page.click('#bUndo')
+    assert dg.ports('read_zip', 'out') == ['yaml', 'images'] and len(dg.edges()) == 12

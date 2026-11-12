@@ -43,6 +43,7 @@ button:hover{border-color:var(--accent)}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 button:disabled{opacity:.45;cursor:default;border-color:var(--line)}
 button.danger{color:var(--danger)}
+button[aria-pressed="true"]{background:var(--sel);border-color:var(--accent)}
 button kbd{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
 
 #toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
@@ -73,6 +74,9 @@ main{flex:1;display:flex;min-height:0}
 .port{fill:var(--canvas);stroke:var(--fg);stroke-width:1.3}
 .port[data-dir="out"]{fill:var(--fg)}
 .edge{fill:none;stroke:var(--edge);stroke-width:1.5}
+#canvas.connecting, #canvas.connecting .node{cursor:crosshair}
+.node.source .shape{stroke:var(--accent);stroke-width:2.2;stroke-dasharray:5 3}
+.rubber{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-dasharray:6 4;pointer-events:none}
 .edge.sel{stroke:var(--accent);stroke-width:2.4}
 .ehit{fill:none;stroke:transparent;stroke-width:14;cursor:pointer}
 .arrow{fill:var(--edge)}
@@ -95,6 +99,12 @@ aside input{font:14px var(--ui);color:var(--fg);background:var(--canvas);border:
 aside p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
 aside code{font:12.5px var(--mono);color:var(--fg)}
 .pane{display:flex;flex-direction:column;gap:8px}
+#portList{display:flex;flex-direction:column;gap:4px}
+.prow{display:grid;grid-template-columns:2.2em minmax(0,1fr) minmax(0,1fr) auto;gap:4px;align-items:center}
+.prow span{font:11px var(--mono);color:var(--muted)}
+.prow input{font-size:13px;padding:4px 6px}
+.prow input[aria-invalid="true"]{border-color:var(--danger);outline-color:var(--danger)}
+.prow button{padding:3px 8px}
 
 #dlg{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);display:grid;place-items:center;z-index:20;padding:16px}
 #dlg .box{background:var(--canvas);border:1px solid var(--line);border-radius:8px;width:min(640px,100%);max-height:100%;
@@ -165,6 +175,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
   <div id="toolbar">
     <div class="group edit">
       <button id="bNode" title="Add a node (N)">Node<kbd>N</kbd></button>
+      <button id="bConnect" title="Connect nodes with an edge (C)" aria-pressed="false">Connect<kbd>C</kbd></button>
       <button id="bEdit" title="Edit the label (F2 or double-click)">Edit<kbd>F2</kbd></button>
       <button id="bDel" class="danger" title="Delete the selected node or edge (Delete)">Delete<kbd>Del</kbd></button>
     </div>
@@ -180,7 +191,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
 
 <main>
   <div id="vp" tabindex="0">
-    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" aria-label="Diagram"><g id="view"><g id="edgeLayer"></g><g id="nodeLayer"></g></g></svg>
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" aria-label="Diagram"><g id="view"><g id="edgeLayer"></g><g id="nodeLayer"></g><path id="rubber" class="rubber"/></g></svg>
     <div id="empty">An empty diagram. Press <b>&nbsp;Node&nbsp;</b> to add a node, or open a file from the File menu.</div>
   </div>
   <aside>
@@ -199,7 +210,8 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <input id="type" list="types" placeholder="process, store, decision, …" autocomplete="off" spellcheck="false">
       <datalist id="types"><option value="process"><option value="store"><option value="external"><option value="step"><option value="decision"><option value="start"><option value="end"></datalist>
       <label>Ports</label>
-      <p id="selPorts"></p>
+      <p id="noPorts">None yet. Use <b>Connect</b> to draw an edge; ports are made where it starts and ends.</p>
+      <div id="portList"></div>
     </div>
     <div class="pane" id="edgePane" hidden>
       <h2>Selected edge</h2>
@@ -222,16 +234,19 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <dl class="keys">
         <dt>Click or tap</dt><dd>Select a node or an edge.</dd>
         <dt>Drag a node</dt><dd>Move it. Its edges follow.</dd>
+        <dt>Connect</dt><dd>Then drag from one node to another, or tap one and then the other, to draw an edge between them. The edge leaves the first node from an output port where you started and enters the second at an input port where you finished; starting or finishing on an existing port uses it. Connect stays on until you press it again or <kbd>Esc</kbd>, and while it is on, dragging never moves a node.</dd>
         <dt>Double-click or tap</dt><dd>Edit a node's label.</dd>
         <dt>Drag empty space</dt><dd>Move around the diagram.</dd>
         <dt>Pinch, or <kbd>Ctrl</kbd> + wheel</dt><dd>Zoom in and out.</dd>
-        <dt>Hover a port</dt><dd>Shows its name and data type.</dd>
+        <dt>Hover a port</dt><dd>Shows its name and data type. Rename a port or give it a data type in the panel; × deletes it, with its edges.</dd>
+        <dt>Delete an edge</dt><dd>Also deletes the ports it leaves unused that the editor named (<code>in1</code>, <code>out2</code> …) and that have no data type.</dd>
       </dl>
     </section>
     <section>
       <h3>Keyboard</h3>
       <dl class="keys">
         <dt><kbd>N</kbd></dt><dd>Add a node.</dd>
+        <dt><kbd>C</kbd></dt><dd>Turn Connect on or off.</dd>
         <dt><kbd>F2</kbd></dt><dd>Edit the selected node's label. <kbd>Enter</kbd> finishes, <kbd>Shift</kbd>+<kbd>Enter</kbd> starts a new line, <kbd>Esc</kbd> cancels.</dd>
         <dt><kbd>Delete</kbd></dt><dd>Delete the selected node, with its edges, or the selected edge.</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></dt><dd>Undo and redo.</dd>
@@ -459,9 +474,11 @@ function render() {
   nodeLayer.replaceChildren(); edgeLayer.replaceChildren();
   $('#view').setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.k})`);
   $('#empty').hidden = doc.nodes.length > 0;
+  if (source && !nodeById(source.node)) source = null;
+  svg.classList.toggle('connecting', connecting);
   for (const n of doc.nodes) {
     const { w, h } = size(n);
-    const g = el('g', { class: 'node' + (sel?.node === n.id ? ' sel' : ''), 'data-id': n.id, transform: `translate(${n.layout.x} ${n.layout.y})` }, nodeLayer);
+    const g = el('g', { class: 'node' + (sel?.node === n.id ? ' sel' : '') + (source?.node === n.id ? ' source' : ''), 'data-id': n.id, transform: `translate(${n.layout.x} ${n.layout.y})` }, nodeLayer);
     drawShape(g, n, w, h);
     const ls = lines(n), text = el('text', { class: 'label', x: w / 2, y: h / 2 - (ls.length - 1) * 9.5 }, g);
     ls.forEach((line, i) => { el('tspan', { x: w / 2, dy: i ? 19 : '0.35em' }, text).textContent = line; });
@@ -497,8 +514,7 @@ function updatePanel() {
   $('#nonePane').hidden = !!(n || e); $('#nodePane').hidden = !n; $('#edgePane').hidden = !e;
   if (n) {
     $('#selId').textContent = n.id; setValue($('#type'), n.type);
-    const list = (what, ps) => ps.length ? `${what}: ${ps.map(p => p.name + (p.type ? ` (${p.type})` : '')).join(', ')}` : '';
-    $('#selPorts').textContent = [list('Inputs', n.inputs), list('Outputs', n.outputs)].filter(Boolean).join('. ') || 'None yet.';
+    updatePorts(n);
   }
   if (e) { $('#selEdge').textContent = `${e.from} → ${e.to}`; setValue($('#edgeLabel'), e.label); }
   $('#bUndo').disabled = !undoStack.length; $('#bRedo').disabled = !redoStack.length;
@@ -534,9 +550,11 @@ function deleteSelected() {
   if (!sel) return;
   snapshot();
   if (sel.node != null) {
+    const gone = e => endNode(e.from) === sel.node || endNode(e.to) === sel.node, removed = doc.edges.filter(gone);
     doc.nodes = doc.nodes.filter(n => n.id !== sel.node);
-    doc.edges = doc.edges.filter(e => endNode(e.from) !== sel.node && endNode(e.to) !== sel.node);
-  } else doc.edges.splice(sel.edge, 1);
+    doc.edges = doc.edges.filter(e => !gone(e));
+    tidyPorts(removed);
+  } else tidyPorts(doc.edges.splice(sel.edge, 1));
   sel = null;
   changed();
 }
@@ -579,6 +597,134 @@ bind($('#kind'), v => setOr(doc, 'kind', v.trim()));
 bind($('#type'), v => { const n = nodeById(sel?.node); if (n) setOr(n, 'type', v.trim()); });
 bind($('#edgeLabel'), v => { const e = doc.edges[sel?.edge]; if (e) setOr(e, 'label', v); });
 
+/* ---------- ports ---------- */
+const portsOf = (n, dir) => dir === 'in' ? n.inputs : n.outputs;
+const endKey = dir => dir === 'in' ? 'to' : 'from';
+// After edges are deleted: drop the ports they leave unused that the editor named (in1, out2 …) and that have no data type.
+function tidyPorts(removed) {
+  for (const e of removed) for (const dir of ['out', 'in']) {
+    const end = e[endKey(dir)], n = nodeById(endNode(end)), name = end.split('.')[1];
+    if (n && /^(in|out)\d+$/.test(name) && !doc.edges.some(f => f[endKey(dir)] === end)) {
+      const list = portsOf(n, dir), i = list.findIndex(p => p.name === name && !p.type);
+      if (i >= 0) list.splice(i, 1);
+    }
+  }
+}
+function renamePort(n, dir, from, to) {
+  portsOf(n, dir).find(p => p.name === from).name = to;
+  for (const e of doc.edges) if (e[endKey(dir)] === `${n.id}.${from}`) e[endKey(dir)] = `${n.id}.${to}`;
+}
+// The selected node's ports in the panel, a row each: its name, its data type, and × to delete it with its edges.
+// The rows are rebuilt only when the node or the number of ports changes, so a box keeps its focus while you type.
+const portList = $('#portList');
+let portRows = '';
+function updatePorts(n) {
+  const key = `${n.id}:${n.inputs.length}:${n.outputs.length}`;
+  $('#noPorts').hidden = n.inputs.length + n.outputs.length > 0;
+  if (key !== portRows) {
+    portRows = key;
+    portList.replaceChildren(...['in', 'out'].flatMap(dir => portsOf(n, dir).map((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'prow'; row.dataset.dir = dir; row.dataset.i = i;
+      row.innerHTML = `<span>${dir}</span><input class="pname" autocomplete="off" spellcheck="false">`
+        + `<input class="ptype" placeholder="data type" autocomplete="off" spellcheck="false"><button class="danger pdel">×</button>`;
+      return row;
+    })));
+  }
+  for (const row of portList.children) {
+    const p = portsOf(n, row.dataset.dir)[+row.dataset.i], what = `${row.dataset.dir === 'in' ? 'input' : 'output'} ${p.name}`;
+    const name = row.querySelector('.pname');
+    if (document.activeElement !== name) { name.value = p.name; name.removeAttribute('aria-invalid'); }
+    setValue(row.querySelector('.ptype'), p.type);
+    name.setAttribute('aria-label', 'Name of ' + what);
+    row.querySelector('.ptype').setAttribute('aria-label', 'Data type of ' + what);
+    row.querySelector('.pdel').setAttribute('aria-label', 'Delete ' + what);
+    row.querySelector('.pdel').title = `Delete ${what} and its edges`;
+  }
+}
+function portOfRow(row) {
+  const n = nodeById(sel?.node);
+  return n && { n, dir: row.dataset.dir, p: portsOf(n, row.dataset.dir)[+row.dataset.i] };
+}
+let portFresh = true;                 // as for the other boxes: each visit to a box is one undo step
+portList.addEventListener('focusin', () => { portFresh = true; });
+portList.addEventListener('input', e => {
+  const row = e.target.closest('.prow'), it = row && portOfRow(row);
+  if (!it) return;
+  const { n, dir, p } = it;
+  if (e.target.classList.contains('pname')) {
+    const v = e.target.value.trim();
+    if (!NAME.test(v) || portsOf(n, dir).some(q => q !== p && q.name === v)) return e.target.setAttribute('aria-invalid', 'true');
+    e.target.removeAttribute('aria-invalid');
+    if (v === p.name) return;
+    if (portFresh) { snapshot(); portFresh = false; }
+    renamePort(n, dir, p.name, v);
+  } else {
+    if (portFresh) { snapshot(); portFresh = false; }
+    setOr(p, 'type', e.target.value.trim());
+  }
+  changed();
+});
+portList.addEventListener('focusout', e => {             // a name that wasn't accepted goes back to the port's name
+  const row = e.target.closest('.prow'), it = row && portOfRow(row);
+  if (it && e.target.classList.contains('pname')) { e.target.value = it.p.name; e.target.removeAttribute('aria-invalid'); }
+});
+portList.addEventListener('keydown', e => { if (e.key === 'Enter') { e.target.blur(); vp.focus({ preventScroll: true }); } });
+portList.addEventListener('click', e => {
+  const row = e.target.closest('.pdel') && e.target.closest('.prow'), it = row && portOfRow(row);
+  if (!it) return;
+  const { n, dir, p } = it, end = `${n.id}.${p.name}`;
+  snapshot();
+  portsOf(n, dir).splice(+row.dataset.i, 1);
+  doc.edges = doc.edges.filter(e => e[endKey(dir)] !== end);
+  changed();
+});
+
+/* ---------- drawing edges ---------- */
+// While Connect is on, a drag from one node to another, or a tap on each in turn, draws an edge from the first to the second.
+// The edge leaves from the output port under the pointer, or from a new one made there on the nearest side of the node,
+// and enters an input port found or made the same way.
+const rubber = $('#rubber');
+let connecting = false, source = null;          // source: the first tap's { node, port, point }, waiting for the second
+function setConnecting(on) {
+  connecting = on; source = null; rubber.setAttribute('d', '');
+  $('#bConnect').setAttribute('aria-pressed', on);
+  if (on) toast('Connect: drag from one node to another, or tap one and then the other. Esc stops.');
+  render();
+}
+function toDiagram(cx, cy) { const r = svg.getBoundingClientRect(); return [(cx - r.left - view.x) / view.k, (cy - r.top - view.y) / view.k]; }
+// The node at a point on the screen, the name of its port of the given direction there if there is one, and the point.
+function hitAt(cx, cy, dir) {
+  const t = document.elementFromPoint(cx, cy), g = t && t.closest('#canvas g.node');
+  if (!g) return null;
+  const p = t.closest('.port');
+  return { node: g.dataset.id, port: p && p.dataset.dir === dir ? p.dataset.port : null, point: toDiagram(cx, cy) };
+}
+function portFor(n, dir, hit) {
+  if (hit.port) return hit.port;
+  const list = portsOf(n, dir);
+  let i = 1;
+  while (list.some(p => p.name === dir + i)) i++;
+  const { w, h } = size(n), x = hit.point[0] - n.layout.x, y = hit.point[1] - n.layout.y;
+  const side = Object.entries({ left: x, right: w - x, top: y, bottom: h - y }).sort((a, b) => a[1] - b[1])[0][0];
+  const along = side === 'left' || side === 'right' ? y / h : x / w;
+  list.push({ name: dir + i, layout: { side, at: Math.min(0.95, Math.max(0.05, Math.round(along * 20) / 20)) } });
+  return dir + i;
+}
+function connect(from, to) {
+  if (from.node === to.node) return render();
+  const a = nodeById(from.node), b = nodeById(to.node);
+  if (from.port && to.port && doc.edges.some(e => e.from === `${a.id}.${from.port}` && e.to === `${b.id}.${to.port}`)) {
+    render();
+    return toast(`${a.id}.${from.port} and ${b.id}.${to.port} are already joined by an edge.`);
+  }
+  snapshot();
+  doc.edges.push({ from: `${a.id}.${portFor(a, 'out', from)}`, to: `${b.id}.${portFor(b, 'in', to)}` });
+  sel = { edge: doc.edges.length - 1 };
+  changed();
+}
+const showRubber = (a, b) => rubber.setAttribute('d', `M${a} L${b}`);
+
 /* ---------- mouse and touch ---------- */
 let drag = null, lastTap = { id: null, time: 0 };
 const fingers = new Map();            // the pointers that are down, for zooming with two fingers
@@ -593,13 +739,18 @@ svg.addEventListener('pointerdown', e => {
   finishEdit();
   fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (fingers.size === 2) { drag = null; pinch = pinchState(); capture(e); return; }
-  const node = e.target.closest('g.node'), edge = e.target.closest('g[data-edge]');
+  const node = e.target.closest('g.node'), edge = e.target.closest('g[data-edge]'), slop = e.pointerType === 'touch' ? 8 : 4;
+  if (connecting && node) {
+    drag = { connect: hitAt(e.clientX, e.clientY, 'out'), x: e.clientX, y: e.clientY, moved: false, slop };
+    capture(e);
+    return vp.focus({ preventScroll: true });
+  }
   if (node) {
     const n = nodeById(node.dataset.id);
     sel = { node: n.id };
-    drag = { node: n, x: e.clientX, y: e.clientY, from: { ...n.layout }, moved: false };
+    drag = { node: n, x: e.clientX, y: e.clientY, from: { ...n.layout }, moved: false, slop };
   } else if (edge) { sel = { edge: +edge.dataset.edge }; drag = null; }
-  else { sel = null; drag = { pan: true, x: e.clientX, y: e.clientY, from: { ...view }, moved: false }; }
+  else { sel = null; source = null; drag = { pan: true, x: e.clientX, y: e.clientY, from: { ...view }, moved: false, slop }; }
   if (drag) capture(e);
   render();
   vp.focus({ preventScroll: true });
@@ -613,9 +764,10 @@ svg.addEventListener('pointermove', e => {
     pinch = now;
     return;
   }
-  if (!drag) return;
+  if (!drag) { if (connecting && source) showRubber(source.point, toDiagram(e.clientX, e.clientY)); return; }
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+  if (!drag.moved && Math.hypot(dx, dy) < drag.slop) return;
+  if (drag.connect) { drag.moved = true; showRubber(drag.connect.point, toDiagram(e.clientX, e.clientY)); return; }
   if (drag.pan) { view.x = drag.from.x + dx; view.y = drag.from.y + dy; svg.classList.add('panning'); }
   else {
     if (!drag.moved) snapshot();
@@ -630,6 +782,14 @@ function endDrag(e) {
   if (!drag) return;
   const d = drag; drag = null;
   svg.classList.remove('panning');
+  if (d.connect) {
+    rubber.setAttribute('d', '');
+    const target = hitAt(e.clientX, e.clientY, 'in');
+    if (d.moved) { source = null; return target ? connect(d.connect, target) : render(); }
+    if (source && target && target.node !== source.node) { const s = source; source = null; return connect(s, target); }
+    source = source && target?.node === source.node ? null : d.connect;      // tapping the first node again lets it go
+    return render();
+  }
   if (d.moved) { if (d.node) store(); return; }
   if (d.node) {                                           // a tap: a second one soon after edits the label
     const now = Date.now();
@@ -726,7 +886,7 @@ const closeHelp = () => { $('#dlg').hidden = true; vp.focus({ preventScroll: tru
 const commands = {
   bNew: newDiagram, bOpen: () => $('#fileIn').click(), bSave: saveDiagram,
   bZoomIn: () => zoom(1.25), bZoomOut: () => zoom(0.8), bFit: fit,
-  bNode: addNode, bEdit: editLabel, bDel: deleteSelected, bUndo: undo, bRedo: redo,
+  bNode: addNode, bConnect: () => setConnecting(!connecting), bEdit: editLabel, bDel: deleteSelected, bUndo: undo, bRedo: redo,
   bHelp: openHelp, hClose: closeHelp,
 };
 for (const [id, run] of Object.entries(commands)) $('#' + id).addEventListener('click', () => { closeMenus(); run(); });
@@ -734,14 +894,14 @@ $('#dlg').addEventListener('pointerdown', e => { if (e.target === $('#dlg')) clo
 
 document.addEventListener('keydown', e => {
   const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
-  if (e.key === 'Escape') { if (!$('#dlg').hidden) closeHelp(); closeMenus(); return; }
+  if (e.key === 'Escape') { if (!$('#dlg').hidden) closeHelp(); else if (connecting) setConnecting(false); closeMenus(); return; }
   if (ctrl && key === 's') { e.preventDefault(); return saveDiagram(); }
   if (ctrl && key === 'o') { e.preventDefault(); return $('#fileIn').click(); }
   if (e.target.closest('input, textarea, select') || !$('#dlg').hidden) return;
   if (ctrl && key === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
   if (ctrl && key === 'y') { e.preventDefault(); return redo(); }
   if (ctrl || e.altKey) return;
-  const run = { n: addNode, f2: editLabel, delete: deleteSelected, backspace: deleteSelected, '?': openHelp,
+  const run = { n: addNode, c: () => setConnecting(!connecting), f2: editLabel, delete: deleteSelected, backspace: deleteSelected, '?': openHelp,
                 '+': () => zoom(1.25), '=': () => zoom(1.25), '-': () => zoom(0.8), '0': fit }[key];
   if (run) { e.preventDefault(); run(); }
 });
