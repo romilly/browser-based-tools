@@ -739,3 +739,71 @@ def test_dragging_a_port_moves_it_around_the_node_and_the_edge_follows(joined, t
 def test_tapping_a_port_selects_its_node(joined):
     joined.page.mouse.click(*joined.port_centre('b', 'in', 'in1'))
     assert joined.page.text_content('#selId') == 'b'
+
+
+# --- how types are drawn ---
+
+def stacked(dg, node_id):
+    """The lines of text on a node, top to bottom."""
+    return dg.node(node_id).locator('.label tspan').all_text_contents()
+
+
+def test_a_type_without_a_shape_of_its_own_is_named_above_the_label(dg):
+    dg.add_node()
+    assert stacked(dg, 'node') == ['Node']
+    for t, lines in [('process', ['Node']), ('step', ['Node']), ('', ['Node'])]:
+        dg.page.select_option('#type', t)
+        assert stacked(dg, 'node') == lines, t
+    dg.page.select_option('#type', label='Other…')
+    dg.page.keyboard.type('entity')
+    dg.page.keyboard.press('Enter')
+    assert stacked(dg, 'node') == ['«entity»', 'Node']
+    assert dg.node('node').locator('.label tspan.stereo').count() == 1
+
+
+def test_the_shape_of_a_type_is_chosen_in_the_panel_for_every_node_of_that_type(dg, tmp_path):
+    path = tmp_path / 'er.yaml'
+    path.write_text('diagram:\n  title: Shop\n  kind: er\n  nodes:\n'
+                    '    places: {type: relationship, label: places}\n    buys: {type: relationship, label: buys}\n'
+                    '    order: {type: entity, label: Order}\n')
+    dg.open(path)
+    assert not dg.page.is_visible('#shape')                    # nothing selected
+    dg.node('places').click()
+    assert dg.page.is_visible('#shape') and dg.page.input_value('#shape') == ''
+    assert options(dg, '#shape') == ['Default: rectangle', 'rectangle', 'rounded', 'diamond', 'pill', 'store', 'external']
+    dg.page.select_option('#shape', 'diamond')
+    for node in ('places', 'buys'):
+        assert dg.node(node).locator('.shape').evaluate('e => e.tagName') == 'polygon'
+        assert stacked(dg, node) == [dg.label(node).strip()]   # the shape now says what it is
+    assert stacked(dg, 'order') == ['«entity»', 'Order']
+    data = dg.saved(tmp_path / 'out')['diagram']
+    assert data['layout'] == {'shapes': {'relationship': 'diamond'}}
+    assert 'layout' not in data['nodes']['places'] or 'shape' not in data['nodes']['places']['layout']
+    dg.page.click('#bUndo')
+    assert dg.node('buys').locator('.shape').evaluate('e => e.tagName') == 'rect'
+    assert 'layout' not in dg.saved(tmp_path / 'undone')['diagram']
+
+
+def test_a_built_in_type_can_be_given_another_shape_and_given_back_its_own(dg, tmp_path):
+    dg.add_node()
+    dg.page.select_option('#type', 'decision')
+    assert options(dg, '#shape')[0] == 'Default: diamond'
+    dg.page.select_option('#shape', 'pill')
+    assert dg.node('node').locator('.shape').evaluate('e => [e.tagName, +e.getAttribute("rx") > 0]') == ['rect', True]
+    dg.page.select_option('#shape', '')
+    assert dg.node('node').locator('.shape').evaluate('e => e.tagName') == 'polygon'
+    assert 'layout' not in dg.saved(tmp_path)['diagram']
+
+
+def test_a_node_without_a_type_has_no_shape_choice(dg):
+    dg.add_node()
+    assert dg.page.is_visible('#type') and not dg.page.is_visible('#shape')
+
+
+def test_an_unknown_shape_name_in_a_file_is_kept_and_drawn_as_a_rectangle(dg, tmp_path):
+    path = tmp_path / 'odd.yaml'
+    path.write_text('diagram:\n  title: Odd\n  nodes:\n    a: {type: cloud, label: A}\n  layout:\n    shapes: {cloud: cloud}\n')
+    dg.open(path)
+    assert dg.node('a').locator('.shape').evaluate('e => e.tagName') == 'rect'
+    assert stacked(dg, 'a') == ['A']
+    assert dg.saved(tmp_path / 'out')['diagram']['layout'] == {'shapes': {'cloud': 'cloud'}}

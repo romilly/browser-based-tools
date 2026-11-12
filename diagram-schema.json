@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Diagram Schema",
-  "description": "Schema for the Diagram Editor's YAML format (diagram-editor.html). A diagram is a set of typed nodes with named input and output ports, and edges that each join an output port to an input port. It is meant to be read by programs that generate code or run processes, so meaning and drawing are kept apart: everything about position, size and shape is in a 'layout' block (on a node, a port or an edge), which such a program can ignore. Three rules can't be checked by this schema: every edge's 'from' must name an output port of a node in the diagram, every edge's 'to' must name an input port, and node ids and port names must be unique (YAML parsers reject duplicate keys). An image path should also name a file in the same zip.",
+  "description": "Schema for the Diagram Editor's YAML format (diagram-editor.html). A diagram is a set of typed nodes with named input and output ports, and edges that each join an output port to an input port. It is meant to be read by programs that generate code or run processes, so meaning and drawing are kept apart: everything about position, size and shape is in a 'layout' block (on the diagram, a node, a port or an edge), which such a program can ignore. Three rules can't be checked by this schema: every edge's 'from' must name an output port of a node in the diagram, every edge's 'to' must name an input port, and node ids and port names must be unique (YAML parsers reject duplicate keys). An image path should also name a file in the same zip.",
   "definitions": {
     "name": {
       "type": "string",
@@ -20,7 +20,12 @@
           "description": "Where the port is drawn on the node's border. Without it, inputs are spaced down the left side and outputs down the right",
           "properties": {
             "side": {
-              "enum": ["left", "right", "top", "bottom"]
+              "enum": [
+                "left",
+                "right",
+                "top",
+                "bottom"
+              ]
             },
             "at": {
               "type": "number",
@@ -79,7 +84,10 @@
         "layout": {
           "type": "object",
           "description": "Where the node is drawn. Without it, the editor places the node itself when it opens the file",
-          "required": ["x", "y"],
+          "required": [
+            "x",
+            "y"
+          ],
           "properties": {
             "x": {
               "type": "number",
@@ -117,7 +125,10 @@
     "edge": {
       "type": "object",
       "description": "An edge: a line from an output port to an input port",
-      "required": ["from", "to"],
+      "required": [
+        "from",
+        "to"
+      ],
       "properties": {
         "from": {
           "type": "string",
@@ -178,11 +189,15 @@
     }
   },
   "type": "object",
-  "required": ["diagram"],
+  "required": [
+    "diagram"
+  ],
   "properties": {
     "diagram": {
       "type": "object",
-      "required": ["title"],
+      "required": [
+        "title"
+      ],
       "properties": {
         "title": {
           "type": "string",
@@ -216,6 +231,20 @@
           "items": {
             "$ref": "#/definitions/edge"
           }
+        },
+        "layout": {
+          "type": "object",
+          "description": "How the diagram is drawn, as a whole. A program reading the diagram can ignore it",
+          "properties": {
+            "shapes": {
+              "type": "object",
+              "description": "The shape every node of a type is drawn as, by type name, such as {entity: rectangle, relationship: diamond}. The shapes are 'rectangle', 'rounded' (a rectangle with rounded corners), 'diamond', 'pill', 'store' (a rectangle with a bar down its left side) and 'external' (a rectangle with a shadow); the editor keeps any other name and draws it as a rectangle. Without an entry, the editor's own types have their own shapes (process: rounded; decision: diamond; start and end: pill; store: store; external: external; step: rectangle), and any other type is a rectangle with the type's name above the label",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -297,8 +326,14 @@
             },
             "layout": {
               "curve": [
-                [260, 60],
-                [240, 60]
+                [
+                  260,
+                  60
+                ],
+                [
+                  240,
+                  60
+                ]
               ]
             }
           },
@@ -306,7 +341,13 @@
             "from": "order.next",
             "to": "order.previous"
           }
-        ]
+        ],
+        "layout": {
+          "shapes": {
+            "entity": "rectangle",
+            "relationship": "diamond"
+          }
+        }
       }
     }
   ]

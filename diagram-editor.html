@@ -71,6 +71,7 @@ main{flex:1;display:flex;min-height:0}
 .node .mark{fill:none;stroke:var(--fg);stroke-width:1.4}
 .node.sel .shape{fill:var(--sel);stroke:var(--accent);stroke-width:2.2}
 .node .label{font:14px var(--ui);fill:var(--fg);text-anchor:middle;pointer-events:none}
+.node .label .stereo{font-size:11.5px;fill:var(--muted)}
 .port{fill:var(--canvas);stroke:var(--fg);stroke-width:1.3}
 .port[data-dir="out"]{fill:var(--fg)}
 .edge{fill:none;stroke:var(--edge);stroke-width:1.5}
@@ -217,6 +218,10 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <label for="type">Type</label>
       <select id="type"></select>
       <input id="typeOther" aria-label="Other type" placeholder="Type the type's name" autocomplete="off" spellcheck="false" hidden>
+      <div class="pane" id="shapeBox" hidden>
+        <label for="shape" id="shapeLabel">Shape</label>
+        <select id="shape"></select>
+      </div>
       <label>Ports</label>
       <p id="noPorts">None yet. Use <b>Connect</b> to draw an edge; ports are made where it starts and ends.</p>
       <div id="portList"></div>
@@ -249,6 +254,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <dt>Double-click or tap</dt><dd>Edit a node's label.</dd>
         <dt>Drag empty space</dt><dd>Move around the diagram.</dd>
         <dt>Pinch, or <kbd>Ctrl</kbd> + wheel</dt><dd>Zoom in and out.</dd>
+        <dt>Type and shape</dt><dd>Choose a node's type in the panel, or <b>Other…</b> to type any name. Each type the editor knows has its own shape; a node of any other type is a rectangle with its type above the label, «like this». <b>Shape</b> sets the shape of every node of the selected node's type.</dd>
         <dt>Hover a port</dt><dd>Shows its name and data type. Rename a port or give it a data type in the panel; × deletes it, with its edges.</dd>
         <dt>Delete an edge</dt><dd>Also deletes the ports it leaves unused that the editor named (<code>in1</code>, <code>out2</code> …) and that have no data type.</dd>
       </dl>
@@ -352,6 +358,10 @@ function fromYaml(text) {
     out.nodes.push(clean({ id, type: str(o.type), label: str(o.label), inputs: ports(o.inputs, id, 'inputs'), outputs: ports(o.outputs, id, 'outputs'),
                            properties: props(o.properties), note: str(o.note), image: str(o.image), layout: L }));
   }
+  if (isMap(d.layout) && isMap(d.layout.shapes)) {
+    const shapes = Object.fromEntries(Object.entries(d.layout.shapes).filter(([, v]) => typeof v === 'string' && v));
+    if (Object.keys(shapes).length) out.layout = { shapes };
+  }
   if (d.edges != null && !Array.isArray(d.edges)) throw new Error('In this file, edges is not a list.');
   const has = (end, list) => {
     const [id, port] = end.split('.'), n = out.nodes.find(n => n.id === id);
@@ -379,6 +389,7 @@ function toFile() {
     type: n.type, label: n.label, inputs: portsOut(n.inputs), outputs: portsOut(n.outputs),
     properties: n.properties, note: n.note, image: n.image, layout: n.layout })]));
   if (doc.edges.length) d.edges = doc.edges.map(e => clean({ ...e }));
+  if (doc.layout?.shapes && Object.keys(doc.layout.shapes).length) d.layout = { shapes: { ...doc.layout.shapes } };
   return { diagram: d };
 }
 const toYaml = () => jsyaml.dump(toFile(), { lineWidth: -1, noRefs: true, sortKeys: false });
@@ -386,13 +397,22 @@ const toYaml = () => jsyaml.dump(toFile(), { lineWidth: -1, noRefs: true, sortKe
 /* ---------- geometry ---------- */
 const measurer = document.createElement('canvas').getContext('2d');
 function textWidth(t) { measurer.font = '14px "IBM Plex Sans", system-ui, sans-serif'; return measurer.measureText(t).width; }
+// The shape each of the editor's own types is drawn as; a diagram can set the shape of any type in layout.shapes.
+const OWN_SHAPES = { process: 'rounded', decision: 'diamond', start: 'pill', end: 'pill', store: 'store', external: 'external', step: 'rectangle' };
+const SHAPES = ['rectangle', 'rounded', 'diamond', 'pill', 'store', 'external'];
+const chosenShape = type => type && doc.layout?.shapes && Object.hasOwn(doc.layout.shapes, type) ? doc.layout.shapes[type] : undefined;
+const ownShape = type => type && Object.hasOwn(OWN_SHAPES, type) ? OWN_SHAPES[type] : undefined;
+const shapeOf = n => chosenShape(n.type) ?? ownShape(n.type) ?? 'rectangle';
+// A type with no shape of its own is named on the node, above the label.
+const typeLine = n => n.type && !ownShape(n.type) && !chosenShape(n.type) ? `«${n.type}»` : null;
 const lines = n => (n.label || '').split('\n');
+const allLines = n => typeLine(n) ? [typeLine(n), ...lines(n)] : lines(n);
 // A node's size: what the file says, or else big enough for its label.
 function size(n) {
   const L = n.layout || {};
   if (L.w && L.h) return { w: L.w, h: L.h };
-  let w = Math.max(100, Math.ceil(Math.max(...lines(n).map(textWidth)) / 10) * 10 + 30), h = Math.max(50, lines(n).length * 19 + 22);
-  if (n.type === 'decision') { w = Math.round(w * 1.5 / 10) * 10; h = Math.round(h * 1.5 / 10) * 10; }
+  let w = Math.max(100, Math.ceil(Math.max(...allLines(n).map(textWidth)) / 10) * 10 + 30), h = Math.max(50, allLines(n).length * 19 + 22);
+  if (shapeOf(n) === 'diamond') { w = Math.round(w * 1.5 / 10) * 10; h = Math.round(h * 1.5 / 10) * 10; }
   return { w: L.w || w, h: L.h || h };
 }
 const NORMAL = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
@@ -407,7 +427,7 @@ function portPoints(n) {
     let i = 0;
     for (const { dir, p } of ps) {
       const at = p.layout?.at ?? ++i / (free + 1);
-      const inset = n.type === 'decision' ? Math.abs(2 * at - 1) / 2 : 0;       // a diamond's sides slope inwards
+      const inset = shapeOf(n) === 'diamond' ? Math.abs(2 * at - 1) / 2 : 0;       // a diamond's sides slope inwards
       const [x, y] = side === 'left' ? [inset * w, at * h] : side === 'right' ? [w - inset * w, at * h]
         : side === 'top' ? [at * w, inset * h] : [at * w, h - inset * h];
       out.push({ dir, name: p.name, type: p.type, side, x, y });
@@ -474,9 +494,9 @@ function el(name, attrs = {}, parent) {
   return e;
 }
 function drawShape(g, n, w, h) {
-  const t = n.type;
-  if (t === 'decision') return el('polygon', { class: 'shape', points: `${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}` }, g);
-  const rx = t === 'start' || t === 'end' ? h / 2 : t === 'process' ? 9 : 0;
+  const t = shapeOf(n);
+  if (t === 'diamond') return el('polygon', { class: 'shape', points: `${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}` }, g);
+  const rx = t === 'pill' ? h / 2 : t === 'rounded' ? 9 : 0;
   el('rect', { class: 'shape', width: w, height: h, rx }, g);
   if (t === 'store') el('path', { class: 'mark', d: `M12 0V${h}` }, g);                                  // a data store's bar
   if (t === 'external') el('path', { class: 'mark', d: `M4 ${h + 4}H${w + 4}V4` }, g);                   // an outside party's shadow
@@ -492,8 +512,10 @@ function render() {
     const { w, h } = size(n);
     const g = el('g', { class: 'node' + (sel?.node === n.id ? ' sel' : '') + (source?.node === n.id ? ' source' : ''), 'data-id': n.id, transform: `translate(${n.layout.x} ${n.layout.y})` }, nodeLayer);
     drawShape(g, n, w, h);
-    const ls = lines(n), text = el('text', { class: 'label', x: w / 2, y: h / 2 - (ls.length - 1) * 9.5 }, g);
-    ls.forEach((line, i) => { el('tspan', { x: w / 2, dy: i ? 19 : '0.35em' }, text).textContent = line; });
+    const ls = allLines(n), text = el('text', { class: 'label', x: w / 2, y: h / 2 - (ls.length - 1) * 9.5 }, g);
+    ls.forEach((line, i) => {
+      el('tspan', { x: w / 2, dy: i ? 19 : '0.35em', ...(i === 0 && typeLine(n) ? { class: 'stereo' } : {}) }, text).textContent = line;
+    });
     for (const p of portPoints(n)) {
       const c = el('circle', { class: 'port', 'data-dir': p.dir, 'data-port': p.name, cx: p.x, cy: p.y, r: 4.5 }, g);
       el('title', {}, c).textContent = `${p.dir === 'in' ? 'Input' : 'Output'} ${p.name}` + (p.type ? `: ${p.type}` : '');
@@ -534,7 +556,7 @@ function updatePanel() {
   const n = sel?.node != null ? nodeById(sel.node) : null, e = sel?.edge != null ? doc.edges[sel.edge] : null;
   $('#nonePane').hidden = !!(n || e); $('#nodePane').hidden = !n; $('#edgePane').hidden = !e;
   if (n) {
-    $('#selId').textContent = n.id; showType();
+    $('#selId').textContent = n.id; showType(); showShape(n);
     updatePorts(n);
   }
   if (e) { $('#selEdge').textContent = `${e.from} → ${e.to}`; setValue($('#edgeLabel'), e.label); $('#edgeAuto').disabled = !e.layout?.curve; }
@@ -637,6 +659,31 @@ function choice(select, other, known, get, set) {
   other.addEventListener('blur', () => { typing = false; show(); });
   return show;
 }
+// The shape of every node of the selected node's type.
+let shapeShown = '';
+function showShape(n) {
+  const box = $('#shapeBox'), select = $('#shape');
+  box.hidden = !n.type;
+  if (!n.type) return;
+  const chosen = chosenShape(n.type) ?? '', names = chosen && !SHAPES.includes(chosen) ? [...SHAPES, chosen] : SHAPES;
+  const key = JSON.stringify([n.type, names]);
+  if (key !== shapeShown) {
+    shapeShown = key;
+    $('#shapeLabel').textContent = `Shape of every ${n.type} node`;
+    select.replaceChildren(...[['', 'Default: ' + (ownShape(n.type) ?? 'rectangle')], ...names.map(s => [s, s])]
+      .map(([value, text]) => Object.assign(document.createElement('option'), { value, textContent: text })));
+  }
+  select.value = chosen;
+}
+$('#shape').addEventListener('change', e => {
+  const n = nodeById(sel?.node);
+  if (!n?.type) return;
+  snapshot();
+  const shapes = { ...doc.layout?.shapes };
+  if (e.target.value) shapes[n.type] = e.target.value; else delete shapes[n.type];
+  if (Object.keys(shapes).length) doc.layout = { shapes }; else delete doc.layout;
+  changed();
+});
 const showKind = choice($('#kind'), $('#kindOther'), ['dataflow', 'flowchart', 'er', 'class'],
   () => doc.kind, v => setOr(doc, 'kind', v));
 const showType = choice($('#type'), $('#typeOther'), ['process', 'store', 'external', 'step', 'decision', 'start', 'end'],
