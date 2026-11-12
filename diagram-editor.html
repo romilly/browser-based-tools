@@ -99,6 +99,8 @@ aside{width:300px;flex:none;border-left:1px solid var(--line);background:var(--p
 aside label,aside h2{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:400;margin:0}
 aside h2{font-weight:600;margin-top:6px;padding-top:10px;border-top:1px solid var(--line)}
 aside h2:first-child{margin-top:0;padding-top:0;border-top:0}
+aside select{font:14px var(--ui);color:var(--fg);background:var(--canvas);border:1px solid var(--line);border-radius:5px;
+  padding:6px 8px;min-width:0;width:100%;box-sizing:border-box}
 aside input{font:14px var(--ui);color:var(--fg);background:var(--canvas);border:1px solid var(--line);border-radius:5px;
   padding:6px 8px;min-width:0;width:100%;box-sizing:border-box}
 aside p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
@@ -205,16 +207,16 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
     <label for="title">Title</label>
     <input id="title" autocomplete="off">
     <label for="kind">Kind</label>
-    <input id="kind" list="kinds" placeholder="dataflow, flowchart, …" autocomplete="off" spellcheck="false">
-    <datalist id="kinds"><option value="dataflow"><option value="flowchart"><option value="er"><option value="class"></datalist>
+    <select id="kind"></select>
+    <input id="kindOther" aria-label="Other kind" placeholder="Type the kind's name" autocomplete="off" spellcheck="false" hidden>
 
     <div class="pane" id="nonePane"><h2>Selection</h2><p>Select a node or an edge to see its details.</p></div>
     <div class="pane" id="nodePane" hidden>
       <h2>Selected node</h2>
       <p>Id: <code id="selId"></code></p>
       <label for="type">Type</label>
-      <input id="type" list="types" placeholder="process, store, decision, …" autocomplete="off" spellcheck="false">
-      <datalist id="types"><option value="process"><option value="store"><option value="external"><option value="step"><option value="decision"><option value="start"><option value="end"></datalist>
+      <select id="type"></select>
+      <input id="typeOther" aria-label="Other type" placeholder="Type the type's name" autocomplete="off" spellcheck="false" hidden>
       <label>Ports</label>
       <p id="noPorts">None yet. Use <b>Connect</b> to draw an edge; ports are made where it starts and ends.</p>
       <div id="portList"></div>
@@ -297,7 +299,8 @@ function snapshot() { undoStack.push(JSON.stringify(doc)); if (undoStack.length 
 function restore(from, to) {
   if (!from.length) return;
   to.push(JSON.stringify(doc));
-  doc = JSON.parse(from.pop()); sel = null;
+  doc = JSON.parse(from.pop());
+  if (!(sel?.node != null && nodeById(sel.node))) sel = null;      // a selected node stays selected, so you can see what changed
   changed();
 }
 const undo = () => restore(undoStack, redoStack), redo = () => restore(redoStack, undoStack);
@@ -527,11 +530,11 @@ function render() {
 }
 function setValue(input, value) { if (document.activeElement !== input) input.value = value || ''; }
 function updatePanel() {
-  setValue($('#title'), doc.title); setValue($('#kind'), doc.kind);
+  setValue($('#title'), doc.title); showKind();
   const n = sel?.node != null ? nodeById(sel.node) : null, e = sel?.edge != null ? doc.edges[sel.edge] : null;
   $('#nonePane').hidden = !!(n || e); $('#nodePane').hidden = !n; $('#edgePane').hidden = !e;
   if (n) {
-    $('#selId').textContent = n.id; setValue($('#type'), n.type);
+    $('#selId').textContent = n.id; showType();
     updatePorts(n);
   }
   if (e) { $('#selEdge').textContent = `${e.from} → ${e.to}`; setValue($('#edgeLabel'), e.label); $('#edgeAuto').disabled = !e.layout?.curve; }
@@ -611,8 +614,33 @@ function bind(input, set) {
 }
 const setOr = (o, k, v) => { if (v) o[k] = v; else delete o[k]; };
 bind($('#title'), v => { doc.title = v; });
-bind($('#kind'), v => setOr(doc, 'kind', v.trim()));
-bind($('#type'), v => { const n = nodeById(sel?.node); if (n) setOr(n, 'type', v.trim()); });
+// A drop-down of the names the editor knows, with any other name the diagram uses, and Other… to type a new one
+// in the box below it. (A text box with suggestions only suggests what matches what's already in it.)
+const OTHER = '\u2026other';
+function choice(select, other, known, get, set) {
+  let typing = false, shown = '';
+  const show = () => {
+    const v = get() || '', names = v && !known.includes(v) ? [...known, v] : known, key = JSON.stringify([names, typing]);
+    if (key !== shown) {
+      shown = key;
+      select.replaceChildren(...[['', '(none)'], ...names.map(n => [n, n]), [OTHER, 'Other…']]
+        .map(([value, text]) => Object.assign(document.createElement('option'), { value, textContent: text })));
+    }
+    select.value = typing ? OTHER : v;
+    other.hidden = !typing;
+  };
+  select.addEventListener('change', () => {
+    if (select.value === OTHER) { typing = true; other.value = ''; show(); return other.focus(); }
+    snapshot(); set(select.value); changed();
+  });
+  bind(other, v => set(v.trim()));
+  other.addEventListener('blur', () => { typing = false; show(); });
+  return show;
+}
+const showKind = choice($('#kind'), $('#kindOther'), ['dataflow', 'flowchart', 'er', 'class'],
+  () => doc.kind, v => setOr(doc, 'kind', v));
+const showType = choice($('#type'), $('#typeOther'), ['process', 'store', 'external', 'step', 'decision', 'start', 'end'],
+  () => nodeById(sel?.node)?.type, v => { const n = nodeById(sel?.node); if (n) setOr(n, 'type', v); });
 bind($('#edgeLabel'), v => { const e = doc.edges[sel?.edge]; if (e) setOr(e, 'label', v); });
 
 /* ---------- ports ---------- */

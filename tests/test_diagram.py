@@ -390,7 +390,7 @@ def test_the_diagram_is_kept_when_the_page_is_reloaded(dg):
 
 def test_the_title_and_kind_are_edited_in_the_panel_and_name_the_file(dg, tmp_path):
     dg.page.fill('#title', 'Order handling')
-    dg.page.fill('#kind', 'flowchart')
+    dg.page.select_option('#kind', 'flowchart')
     path = dg.save(tmp_path)
     assert path.name == 'order_handling.yaml'
     assert yaml.safe_load(path.read_text()) == {'diagram': {'title': 'Order handling', 'kind': 'flowchart'}}
@@ -418,9 +418,51 @@ def test_the_type_chosen_in_the_panel_changes_the_shape(dg, tmp_path):
     dg.add_node()
     assert dg.page.text_content('#selId') == 'node'
     assert dg.node('node').locator('.shape').evaluate('e => e.tagName') == 'rect'
-    dg.page.fill('#type', 'decision')
+    dg.page.select_option('#type', 'decision')
     assert dg.node('node').locator('.shape').evaluate('e => e.tagName') == 'polygon'
     assert dg.saved(tmp_path)['diagram']['nodes']['node']['type'] == 'decision'
+
+
+def options(dg, select):
+    return dg.page.locator(f'{select} option').all_text_contents()
+
+
+def test_a_type_can_be_changed_again_and_again(dg, tmp_path):
+    dg.add_node()
+    every = ['(none)', 'process', 'store', 'external', 'step', 'decision', 'start', 'end', 'Other…']
+    for t in ['store', 'decision', '']:
+        assert options(dg, '#type') == every
+        dg.page.select_option('#type', t)
+    assert 'type' not in dg.saved(tmp_path)['diagram']['nodes']['node']
+    dg.page.click('#bUndo')
+    assert dg.page.input_value('#type') == 'decision'
+
+
+def test_other_takes_any_type_name_which_then_joins_the_list(dg, tmp_path):
+    dg.add_node()
+    assert not dg.page.is_visible('#typeOther')
+    dg.page.select_option('#type', label='Other…')
+    assert dg.page.is_visible('#typeOther')
+    dg.page.keyboard.type('queue')                     # the box has the focus
+    dg.page.keyboard.press('Enter')
+    assert not dg.page.is_visible('#typeOther')
+    assert dg.page.input_value('#type') == 'queue' and options(dg, '#type')[-2:] == ['queue', 'Other…']
+    assert dg.saved(tmp_path)['diagram']['nodes']['node']['type'] == 'queue'
+    dg.page.select_option('#type', 'process')          # and still back to one of the list
+    assert options(dg, '#type')[-2:] == ['end', 'Other…']
+    dg.page.click('#bUndo')
+    dg.page.click('#bUndo')
+    assert 'type' not in dg.saved(tmp_path / 'undone')['diagram']['nodes']['node']
+
+
+def test_a_kind_or_type_from_a_file_is_shown_in_the_list(dg, tmp_path):
+    path = tmp_path / 'er.yaml'
+    path.write_text('diagram:\n  title: Shop\n  kind: er\n  nodes:\n    order: {type: entity, label: Order}\n')
+    dg.open(path)
+    assert dg.page.input_value('#kind') == 'er'
+    assert options(dg, '#kind') == ['(none)', 'dataflow', 'flowchart', 'er', 'class', 'Other…']
+    dg.node('order').click()
+    assert dg.page.input_value('#type') == 'entity'
 
 
 def test_the_toolbar_holds_only_commands_that_have_keys(dg):
