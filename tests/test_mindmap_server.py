@@ -233,3 +233,137 @@ def test_the_server_maps_list_says_when_there_are_none(smm):
     assert 'No maps' in smm.page.inner_text('#serverList')
     smm.page.keyboard.press('Escape')
     assert not smm.page.locator('#serverMaps[open]').count()
+
+
+# --- links to maps on the server (for example from an Obsidian note) ---
+
+def open_link(mm, name):
+    """Load the editor from the server with ?map=<name>, and wait for it to report opening (or failing)."""
+    base, _ = mm.server
+    mm.page.goto(f'{base}/?map={name}')
+    mm.page.wait_for_selector('.node.root')
+    mm.page.wait_for_function('document.querySelector("#toast").innerText !== ""')
+
+
+def add_child(mm, parent, title):
+    mm.node(parent).click()
+    mm.page.keyboard.press('Tab')
+    mm.page.keyboard.type(title)
+    mm.page.keyboard.press('Enter')
+
+
+def stored_yaml(folder, name='garden'):
+    with zipfile.ZipFile(folder / f'{name}.zip') as z:
+        return z.read(next(n for n in z.namelist() if n.endswith('.yaml'))).decode()
+
+
+def test_a_link_opens_a_map_from_the_server(smm):
+    _, folder = smm.server
+    write_zip(folder / 'garden.zip', MAP, 'garden.yaml')
+    open_link(smm, 'garden')
+    assert 'Opened garden' in smm.message()
+    assert smm.titles() == ['Garden', 'Beans']
+
+
+def test_a_linked_map_saves_back_to_the_server_without_asking(smm):
+    _, folder = smm.server
+    write_zip(folder / 'garden.zip', MAP, 'garden.yaml')
+    open_link(smm, 'garden')
+    smm.page.on('dialog', lambda d: pytest.fail('unexpected question: ' + d.message))
+    add_child(smm, 'Beans', 'Peas')
+    server_save(smm)
+    assert 'Peas' in stored_yaml(folder)
+
+
+def test_a_renamed_linked_map_saves_back_under_its_own_name(smm):
+    _, folder = smm.server
+    write_zip(folder / 'garden.zip', MAP, 'garden.yaml')
+    open_link(smm, 'garden')
+    smm.node('Garden').dblclick()
+    smm.page.keyboard.press('Control+A')
+    smm.page.keyboard.type('Allotment')
+    smm.page.keyboard.press('Enter')
+    server_save(smm)
+    assert 'Allotment' in stored_yaml(folder)
+    assert sorted(p.name for p in folder.iterdir()) == ['garden.zip']
+    assert smm.page.url.endswith('/?map=garden')
+
+
+def test_ctrl_s_saves_a_server_map_to_the_server(smm):
+    _, folder = smm.server
+    write_zip(folder / 'garden.zip', MAP, 'garden.yaml')
+    open_link(smm, 'garden')
+    smm.page.on('download', lambda d: pytest.fail('downloaded ' + d.suggested_filename))
+    add_child(smm, 'Beans', 'Peas')
+    smm.page.keyboard.press('Control+s')
+    smm.page.wait_for_function('document.querySelector("#toast").innerText.includes("to the server")')
+    assert 'Peas' in stored_yaml(folder)
+
+
+def test_ctrl_s_downloads_a_map_that_did_not_come_from_the_server(smm, tmp_path):
+    with smm.page.expect_download() as d:
+        smm.page.keyboard.press('Control+s')
+    assert d.value.suggested_filename.endswith('.zip')
+
+
+def test_a_link_to_a_map_that_is_not_there_says_so(smm):
+    before = smm.titles()
+    open_link(smm, 'nothing')
+    assert 'nothing' in smm.message() and 'not on the server' in smm.message()
+    assert smm.titles() == before
+
+
+def test_a_link_with_a_bad_name_says_so(smm):
+    before = smm.titles()
+    open_link(smm, 'Bad%20Name')
+    assert 'Bad Name' in smm.message() and 'not on the server' in smm.message()
+    assert smm.titles() == before
+
+
+def test_the_address_bar_links_to_the_map_on_the_server(smm):
+    base, folder = smm.server
+    write_zip(folder / 'garden.zip', MAP, 'garden.yaml')
+    server_open(smm, 'garden')
+    assert smm.page.url == f'{base}/?map=garden'
+    smm.menu('File', '#bNew')
+    assert smm.page.url == f'{base}/'
+    server_save(smm)
+    assert smm.page.url == f'{base}/?map=new_mind_map'
+
+
+def test_closing_with_changes_not_saved_to_the_server_asks_first(smm):
+    _, folder = smm.server
+    write_zip(folder / 'garden.zip', MAP, 'garden.yaml')
+    open_link(smm, 'garden')
+    unsaved = 'hasUnsavedChanges()'
+    assert not smm.page.evaluate(unsaved)
+    add_child(smm, 'Beans', 'Peas')
+    assert smm.page.evaluate(unsaved)
+    smm.page.once('dialog', lambda d: d.dismiss())    # stay on the page
+    with smm.page.expect_event('dialog') as asked:
+        smm.page.close(run_before_unload=True)
+    assert asked.value.type == 'beforeunload'
+
+
+def test_saving_to_the_server_clears_the_warning(smm):
+    _, folder = smm.server
+    write_zip(folder / 'garden.zip', MAP, 'garden.yaml')
+    open_link(smm, 'garden')
+    add_child(smm, 'Beans', 'Peas')
+    server_save(smm)
+    assert not smm.page.evaluate('hasUnsavedChanges()')
+
+
+def test_a_map_from_a_link_keeps_its_images_after_a_reload(smm):
+    from PIL import Image
+    base, folder = smm.server
+    pic = io.BytesIO()
+    Image.new('RGB', (40, 30), 'red').save(pic, 'PNG')
+    with zipfile.ZipFile(folder / 'garden.zip', 'w') as z:
+        z.writestr('garden.yaml', MAP.replace('title: Beans', 'title: Beans\n      image: images/beans.png'))
+        z.writestr('images/beans.png', pic.getvalue())
+    open_link(smm, 'garden')
+    smm.page.wait_for_selector('.node .pic img')
+    smm.page.goto(base + '/')                  # the autosaved copy, without the link
+    smm.page.wait_for_function('imagesReady')
+    smm.page.wait_for_selector('.node .pic img')

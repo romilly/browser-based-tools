@@ -114,6 +114,23 @@ curl http://localhost:8765/api/maps
   - Try the server's address instead of its name. `hostname -I` shows it. If the address works but the name doesn't, the problem is with names on your network, not with the server.
 - **The File menu has no server commands:** the page didn't come from the server. Open it from the server's address, not from GitHub Pages or a saved copy.
 
+## Link to a map
+
+Each map on the server has its own address: the server's address followed by `?map=` and the map's name, for example `http://raspberrypi.local:8765/?map=holiday_in_the_netherlands`. The address bar shows it whenever the open map came from the server, so copy it from there.
+
+Put the address in a note to open the map with one click. In Obsidian, for example:
+
+```markdown
+[Holiday mind map](http://raspberrypi.local:8765/?map=holiday_in_the_netherlands)
+```
+
+While a map from the server is open:
+
+- **Save to server** and **Ctrl+S** save it back under the same name, even if you rename its central topic, so the link keeps working. **Save** still downloads a copy.
+- If you try to close the tab or leave the page with changes not saved to the server, the browser asks first.
+
+A link to a map that isn't on the server says so, and leaves the current map as it was.
+
 ## Two devices, one map
 
 Each save names the version it replaces. If someone saved the map on another device after you opened it, **Save to server** asks before replacing their version. It also asks before a new map replaces one of the same name already on the server.

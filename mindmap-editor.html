@@ -53,6 +53,7 @@ button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outl
 button:disabled{opacity:.45;cursor:default;border-color:var(--line)}
 button.danger{color:var(--danger)}
 button kbd{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
+body.server-map #bSave kbd, body:not(.server-map) #bServerSave kbd{display:none}
 
 #toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
 #toolbar .group + .group{padding-left:12px;border-left:1px solid var(--line)}
@@ -224,7 +225,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
         <button id="bSave">Save<kbd>Ctrl+S</kbd></button>
         <button id="bExportMd">Export as Markdown</button>
         <button id="bServerOpen" hidden>Open from server…</button>
-        <button id="bServerSave" hidden>Save to server</button>
+        <button id="bServerSave" hidden>Save to server<kbd>Ctrl+S</kbd></button>
       </div>
     </div>
     <div class="menu">
@@ -385,6 +386,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <p><b>Export as Markdown</b> (also in the File menu) downloads the map as a <code>.zip</code> file of linked Markdown pages, one per branch, in folders arranged like the map, with the images. Each page has the branch's icons, title, picture, web link and note, then links to the branches under it and to its connectors' targets, and at the bottom to the previous and next branch and back up to its parent. Notes and maths are copied as they are, so they show on GitHub or in Obsidian. The editor can't open an export again: use Save for that.</p>
       <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
       <p><b>Open from server</b> and <b>Save to server</b> appear in the File menu when the editor comes from a mind map server on your own network. The server keeps maps in one folder, so all your devices share them. If a map has changed on another device since you opened it here, Save to server asks before replacing it.</p>
+      <p>A map on the server has its own address, which the address bar shows while it is open, such as <code>…:8765/?map=garden</code>; use it to link to the map from notes. While a map from the server is open, Ctrl+S saves it back to the server under the same name, and the browser asks before you close the tab with changes not yet saved there.</p>
       <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
     </section>
     <section>
@@ -1041,7 +1043,7 @@ async function openFile(file) {
     }
     snapshot();
     root = r; uid = maxId(root); sel = root; selConn = null; boxes = new Map();
-    changed();
+    changed(); setServerMap(null);
     toast(`Opened ${file.name}: ${countAll(root) + 1} nodes.` + (missing ? ` ${plural(missing, 'image')} ${missing === 1 ? 'is' : 'are'} missing from the file.` : ''));
     return true;
   } catch (e) { toast(e.message, true); return false; }
@@ -1051,15 +1053,33 @@ async function openFile(file) {
 // When the page comes from mindmap_server.py, the File menu also offers Open from server and Save to server.
 // The server keeps maps in one folder, so every device sees the same ones. Each save names the version it
 // replaces (its ETag), so a map changed on another device since it was opened here isn't overwritten unasked.
+// A link such as http://host:8765/?map=garden opens that map from the server (for example from an Obsidian note).
+// While the map in this tab came from the server, the address bar links to it, Save to server (and Ctrl+S) writes it
+// back under the same name, and closing the tab with changes not yet saved to the server asks first.
 const serverTags = new Map();                       // map name -> ETag of the version last opened or saved here
-fetch('api/maps', { cache: 'no-store' })
+let serverMap = null;                               // { name, yaml } of the map from the server, as last opened or saved
+const serverReady = fetch('api/maps', { cache: 'no-store' })
   .then(r => r.ok && /json/.test(r.headers.get('Content-Type') || '') ? r.json() : null)
-  .then(list => { if (Array.isArray(list)) $('#bServerOpen').hidden = $('#bServerSave').hidden = false; })
-  .catch(() => {});                                 // no server: the commands stay hidden
+  .then(list => {
+    const ok = Array.isArray(list);
+    if (ok) $('#bServerOpen').hidden = $('#bServerSave').hidden = false;
+    return ok;
+  })
+  .catch(() => false);                              // no server: the commands stay hidden
+function setServerMap(name, tag) {
+  if (name) serverTags.set(name, tag);
+  serverMap = name ? { name, yaml: toYaml() } : null;
+  document.body.classList.toggle('server-map', !!name);
+  if (name || /[?&]map=/.test(location.search))
+    try { history.replaceState(null, '', name ? '?map=' + name : location.pathname); } catch (e) {}
+}
+function hasUnsavedChanges() { return !!serverMap && (!!editing || toYaml() !== serverMap.yaml); }
+addEventListener('beforeunload', e => { if (hasUnsavedChanges()) { e.preventDefault(); e.returnValue = ''; } });
 async function serverSave() {
   if (!libsReady()) return;
   if (editing) finishEdit(true);
-  const { name, missing, blob } = await mapZip(), tag = serverTags.get(name);
+  const zipped = await mapZip(), { missing, blob } = zipped;
+  const name = serverMap ? serverMap.name : zipped.name, tag = serverTags.get(name);
   const put = headers => fetch(`api/maps/${name}.zip`, { method: 'PUT', body: blob, headers });
   try {
     let r = await put(tag ? { 'If-Match': tag } : { 'If-None-Match': '*' });
@@ -1070,7 +1090,7 @@ async function serverSave() {
       r = await put({});
     }
     if (!r.ok) throw new Error(`the server answered ${r.status}.`);
-    serverTags.set(name, r.headers.get('ETag'));
+    setServerMap(name, r.headers.get('ETag'));
     toast(`Saved ${name} to the server.` + missingNote(missing));
   } catch (e) { toast('Save to server failed: ' + e.message, true); }
 }
@@ -1097,13 +1117,18 @@ $('#serverList').onclick = async e => {
   const b = e.target.closest('button[data-map]');
   if (!b || !libsReady()) return;
   $('#serverMaps').close();
-  const name = b.dataset.map;
-  try {
-    const r = await fetch(`api/maps/${name}.zip`, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`the server answered ${r.status}.`);
-    if (await openFile(new File([await r.blob()], name + '.zip'))) serverTags.set(name, r.headers.get('ETag'));
-  } catch (e) { toast(`Could not open ${name}: ` + e.message, true); }
+  openServerMap(b.dataset.map);
 };
+async function openServerMap(name) {
+  if (!libsReady()) return;
+  try {
+    const r = /^[a-z0-9_]+$/.test(name) ? await fetch(`api/maps/${name}.zip`, { cache: 'no-store' }) : null;
+    if (!r || r.status === 404) { toast(`${name} is not on the server.`, true); return; }
+    if (!r.ok) throw new Error(`the server answered ${r.status}.`);
+    const tag = r.headers.get('ETag');
+    if (await openFile(new File([await r.blob()], name + '.zip'))) setServerMap(name, tag);
+  } catch (e) { toast(`Could not open ${name}: ` + e.message, true); }
+}
 $('#serverMaps').addEventListener('close', () => vp.focus({ preventScroll: true }));
 
 /* ---------- images ---------- */
@@ -1301,7 +1326,7 @@ mainEl.addEventListener('drop', e => {
   const el = e.target.closest && e.target.closest('.node');    // an image goes on the node it's dropped on
   attachImage(f, el ? findById(root, +el.dataset.id) : sel);
 });
-$('#bNew').onclick = () => { closeMenu(); snapshot(); uid = 0; root = mk('New mind map'); sel = root; selConn = null; cancelConnect(); boxes = new Map(); changed(); };
+$('#bNew').onclick = () => { closeMenu(); snapshot(); uid = 0; root = mk('New mind map'); sel = root; selConn = null; cancelConnect(); boxes = new Map(); changed(); setServerMap(null); };
 $('#hClose').onclick = closeHelp;
 $('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeHelp(); });
 $('#dlg').addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
@@ -1446,7 +1471,7 @@ vp.tabIndex = 0;
 document.addEventListener('keydown', e => {
   if (editing || !$('#dlg').hidden || $('#serverMaps').open) return;
   const ctrl = e.ctrlKey || e.metaKey;
-  if (ctrl && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); closeMenu(); saveMap(); return; }
+  if (ctrl && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); closeMenu(); serverMap ? serverSave() : saveMap(); return; }
   if (ctrl && !e.altKey && e.key.toLowerCase() === 'o') { e.preventDefault(); closeMenu(); $('#fileIn').click(); return; }
   if (openMenu) {
     if (e.key === 'Escape') { closeMenu(); vp.focus({ preventScroll: true }); }
@@ -1501,7 +1526,10 @@ if (stored) { root = stored; uid = maxId(root); } else root = sample();
 sel = root; indexParents();
 (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { boxes = new Map(); render(); vp.focus({ preventScroll: true }); });
 render();
-loadStoredImages().then(render);
+Promise.all([serverReady, loadStoredImages().then(render)]).then(([server]) => {
+  const linked = new URLSearchParams(location.search).get('map');
+  if (server && linked) openServerMap(linked);
+});
 </script>
 </body>
 </html>
