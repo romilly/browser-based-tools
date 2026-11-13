@@ -3,3 +3,4 @@ pytest-playwright
 pyyaml
 jsonschema
 pillow
+pytest-cov

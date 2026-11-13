@@ -12,8 +12,44 @@ from pathlib import Path
 
 import pytest
 
+from js_coverage import JsCoverage, watch
+
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL_LIBS = os.environ.get('CRUD_LOCAL_LIBS')
+
+
+JS_COVERAGE = pytest.StashKey()
+
+
+def pytest_addoption(parser):
+    parser.addoption('--js-coverage', action='store_true',
+                     help="measure which JavaScript in the tools' HTML files the tests run (see tests/js_coverage.py)")
+
+
+def pytest_configure(config):
+    if config.getoption('--js-coverage'):
+        config.stash[JS_COVERAGE] = JsCoverage(ROOT)
+
+
+@pytest.fixture(autouse=True)
+def js_coverage(request):
+    """With --js-coverage, record what runs on each test's page."""
+    coverage = request.config.stash.get(JS_COVERAGE, None)
+    if coverage is None or 'page' not in request.fixturenames:
+        yield
+        return
+    stop = watch(request.getfixturevalue('page'), coverage)
+    yield
+    stop()
+
+
+def pytest_terminal_summary(terminalreporter, config):
+    coverage = config.stash.get(JS_COVERAGE, None)
+    if coverage is not None:
+        coverage.write_html(ROOT / 'js-coverage')
+        terminalreporter.section('JavaScript coverage')
+        terminalreporter.write_line(coverage.table())
+        terminalreporter.write_line('Details: js-coverage/index.html')
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):

@@ -53,6 +53,24 @@ The pages fetch their libraries from cdnjs. To run the tests without internet ac
 
 `npm pack <package>` downloads a package as a `.tgz` file you can unpack.
 
+### Measuring coverage
+
+To see how much of the tools' JavaScript the tests run:
+
+```bash
+pytest --js-coverage
+```
+
+This prints a table for the scripts in each HTML file and writes a report to `js-coverage/index.html`: for each tool, the functions no test called, and the source with the code that never ran highlighted. Chromium does the measuring (`tests/js_coverage.py` collects it), so it works only with the default browser. A line counts as covered if any part of it ran. The tests take about a third longer with it on.
+
+For the Python server, use pytest-cov:
+
+```bash
+pytest --cov=mindmap_server --cov-branch --cov-report=term-missing
+```
+
+The two can be combined in one run.
+
 ## Recording the demo video
 
 `demos/mindmap_demo.py` records a captioned demo of the Mind Map Editor as an mp4, a little under two minutes long. It needs Playwright with Chromium (as for the tests) and `ffmpeg`.

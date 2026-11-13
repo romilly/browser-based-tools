@@ -9,3 +9,8 @@ __pycache__/
 
 # Playwright output (traces, screenshots, videos)
 test-results/
+
+# Coverage reports
+js-coverage/
+htmlcov/
+.coverage
