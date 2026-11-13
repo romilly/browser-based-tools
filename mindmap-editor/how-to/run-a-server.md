@@ -134,6 +134,22 @@ While a map from the server is open:
 
 A link to a map that isn't on the server says so, and leaves the current map as it was.
 
+## Folders
+
+Maps can be kept in folders on the server. **Open from server…** shows one folder at a time: choose a folder to look inside it, and use the path at the top of the list to go back up.
+
+- **Save to server** asks where a new map goes. Walk to the folder, change the name if you like, and choose **Save here**. **New folder…** makes a folder to save into.
+- **Move…** beside a map renames it or puts it in another folder: walk to the folder, change the name if you like, and choose **Move here**. **Move…** beside a folder does the same for the folder and everything in it.
+- **Delete** beside a map asks first, then moves the map to a `.trash` folder inside the maps folder, with the date and time added to its name. Nothing empties `.trash`, so to get a map back, move the file out of it and take the date out of its name; delete what you don't want from it yourself.
+
+A folder is kept only while it has a map in it. A new folder appears on the server when you save or move a map into it, and a folder goes when its last map is moved out or deleted.
+
+A map in a folder has the folders in its address, for example `http://raspberrypi.local:8765/?map=holidays/netherlands`. Moving or renaming a map, or a folder above it, changes that address, so links to it in your notes need changing too.
+
+Folder and map names are lower-case letters, digits and underscores; the editor turns anything else you type into underscores. A folder of maps can't be called `diagrams` at the top level, because that is where the diagrams are kept.
+
+The server must be new enough to know about folders. If the editor says the server is older than the editor, [restart it](#updating).
+
 ## Two devices, one map
 
 Each save names the version it replaces. If someone saved the map on another device after you opened it, **Save to server** asks before replacing their version. It also asks before a new map replaces one of the same name already on the server.
@@ -145,11 +161,12 @@ The same server serves the Diagram Editor at `http://<server name or address>:87
 - Each diagram has its own address, with `?diagram=` and its name, for example `http://raspberrypi.local:8765/diagram-editor.html?diagram=order_handling`.
 - **Ctrl+S** saves a diagram from the server back under the same name, even if you change its title.
 - The browser asks before you leave with changes not saved to the server, and **Save to server** asks before replacing a version saved on another device.
+- Diagrams have [folders](#folders), **Move…** and **Delete** in the same way, with their own `.trash` inside the diagrams folder.
 
 Diagrams are kept as `.yaml` files in the `diagrams` folder inside the maps folder (`~/mindmaps/diagrams` unless you changed it). Maps and diagrams are listed separately, so a map and a diagram can have the same name.
 
 ## Backing up
 
-The maps are ordinary `.zip` files in the server's folder (`~/mindmaps` unless you changed it), and the diagrams are `.yaml` files in its `diagrams` folder, so back up that folder. Each file opens in its editor with **Open**, as well as from the server.
+The maps are ordinary `.zip` files in the server's folder (`~/mindmaps` unless you changed it), and the diagrams are `.yaml` files in its `diagrams` folder, so back up that folder; folders you make in the editor are ordinary folders inside it. Each file opens in its editor with **Open**, as well as from the server.
 
 [Mind Map Editor](../index.md)

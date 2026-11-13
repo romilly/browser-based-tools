@@ -126,6 +126,9 @@ def stored(sdg, name='garden'):
 def server_save(dg, expect='Saved'):
     dg.page.evaluate('document.querySelector("#toast").innerText = ""')
     dg.menu('File', '#bServerSave')
+    dg.page.wait_for_function('document.querySelector("#serverFiles").open || document.querySelector("#toast").innerText !== ""')
+    if dg.page.locator('#serverFiles[open]').count():           # new to the server: the dialog asks where it goes
+        dg.page.click('#serverGo')
     dg.page.wait_for_function('document.querySelector("#toast").innerText !== ""')
     assert expect in dg.message()
 

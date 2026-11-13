@@ -60,14 +60,24 @@ button.mb[aria-expanded="true"]{background:var(--sel);border-color:var(--line)}
 .pop > button{border-color:transparent;background:transparent;text-align:left;display:flex;justify-content:space-between;gap:20px;padding:7px 10px}
 .pop > button:hover:not(:disabled){background:var(--sel)}
 #serverFiles{border:1px solid var(--line);border-radius:8px;background:var(--canvas);color:var(--fg);padding:16px 18px;
-  width:min(420px,calc(100vw - 32px));box-sizing:border-box;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+  width:min(480px,calc(100vw - 32px));box-sizing:border-box;box-shadow:0 10px 40px rgba(0,0,0,.18)}
 #serverFiles::backdrop{background:color-mix(in srgb,var(--bg) 70%,transparent)}
-#serverFiles h2{margin:0 0 10px;font-size:16px}
-#serverList{display:flex;flex-direction:column;gap:4px;max-height:60vh;overflow:auto}
-#serverList button{display:flex;justify-content:space-between;align-items:baseline;gap:12px;text-align:left;padding:8px 10px}
+#serverFiles h2{margin:0 0 8px;font-size:16px;overflow-wrap:anywhere}
+#serverPath{display:flex;flex-wrap:wrap;align-items:center;gap:2px;margin:0 0 8px;font-size:13px;color:var(--muted)}
+#serverPath button{border-color:transparent;background:transparent;padding:2px 5px}
+#serverPath button:last-child{font-weight:600}
+#serverList{display:flex;flex-direction:column;gap:4px;max-height:55vh;overflow:auto}
+.srow{display:flex;gap:4px}
+.srow > button:first-child{flex:1;min-width:0;display:flex;justify-content:space-between;align-items:baseline;gap:12px;text-align:left;padding:8px 10px}
+.srow .sfolder{font-weight:600}
+.srow .smini{flex:none;color:var(--muted)}
 #serverList small{color:var(--muted);white-space:nowrap}
 #serverList p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted)}
-#serverFiles form{display:flex;justify-content:flex-end;margin-top:12px}
+#serverFiles form{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:12px}
+#serverFiles form[hidden], #serverNewFolder[hidden]{display:none}
+#serverNewFolder{margin-right:auto}
+#serverName label{font-size:13px;color:var(--muted)}
+#serverNameIn{flex:1;min-width:0;font:14px var(--ui);color:var(--fg);background:var(--canvas);border:1px solid var(--line);border-radius:5px;padding:6px 8px}
 
 main{flex:1;display:flex;min-height:0}
 #vp{flex:1;position:relative;background:var(--canvas);min-width:0;min-height:0;overflow:hidden}
@@ -211,8 +221,10 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
 <div id="toast" role="status" hidden></div>
 <dialog id="serverFiles" aria-labelledby="serverFilesTitle">
   <h2 id="serverFilesTitle">Open from server</h2>
+  <nav id="serverPath" aria-label="Folder"></nav>
   <div id="serverList"></div>
-  <form method="dialog"><button>Cancel</button></form>
+  <form id="serverName" hidden><label for="serverNameIn">Name</label><input id="serverNameIn" autocomplete="off" spellcheck="false"><button id="serverGo">Save here</button></form>
+  <form method="dialog"><button type="button" id="serverNewFolder" hidden>New folder…</button><button>Cancel</button></form>
 </dialog>
 
 <main>
@@ -292,6 +304,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <h3>Saving</h3>
       <p><b>Save</b> downloads the diagram as a YAML file named after its title; <b>Open</b> reads one back, and you can also drop a file on the diagram. The format is defined by <code>diagram-schema.json</code>. The diagram is also kept in this browser between visits, but not shared with other browsers or devices.</p>
       <p>When the editor comes from the mind map server on your network (<code>mindmap_server.py</code>), the File menu also has <b>Open from server…</b> and <b>Save to server</b>, so every device sees the same diagrams. While a diagram from the server is open, the address bar links to it (for example from a note), <kbd>Ctrl</kbd>+<kbd>S</kbd> saves it back to the server, and the browser asks before you close the tab with changes not yet saved there.</p>
+      <p>Diagrams on the server can be kept in folders. Open from server shows one folder at a time: choose a folder to look inside it, and use the path at the top to go back up. Each diagram has <b>Move…</b>, to rename it or put it in another folder, and <b>Delete</b>, which moves it to a <code>.trash</code> folder on the server. Saving a new diagram asks for its name and folder; <b>New folder…</b> makes one, which is kept once a diagram is in it.</p>
     </section>
   </div>
 </div>
@@ -1009,8 +1022,10 @@ function newDiagram() {
 // A link such as http://host:8765/diagram-editor.html?diagram=garden opens that diagram from the server.
 // While the diagram in this tab came from the server, the address bar links to it, Save to server (and Ctrl+S)
 // writes it back under the same name, and closing the tab with changes not yet saved to the server asks first.
-const serverTags = new Map();                      // diagram name -> ETag of the version last opened or saved here
-let serverDiagram = null;                          // { name, yaml } of the diagram from the server, as last opened or saved
+const serverTags = new Map();                       // diagram name -> ETag of the version last opened or saved here
+let serverDiagram = null;                               // { name, yaml } of the diagram from the server, as last opened or saved
+let serverFolder = '';                              // the folder the dialog last showed
+let browse = { mode: 'open', item: null };          // what the dialog is for: open, save, or move (item = { path, folder })
 const serverReady = fetch('api/diagrams', { cache: 'no-store' })
   .then(r => r.ok && /json/.test(r.headers.get('Content-Type') || '') ? r.json() : null)
   .then(list => {
@@ -1018,9 +1033,13 @@ const serverReady = fetch('api/diagrams', { cache: 'no-store' })
     if (ok) $('#bServerOpen').hidden = $('#bServerSave').hidden = false;
     return ok;
   })
-  .catch(() => false);                             // no server: the commands stay hidden
+  .catch(() => false);                              // no server: the commands stay hidden
+const KEYPATH = /^[a-z0-9_]+(\/[a-z0-9_]+)*$/;      // a name on the server: keys, with / between folders
+const leaf = p => p.split('/').pop();
+const folderOf = p => p.split('/').slice(0, -1).join('/');
+const inFolder = (folder, name) => folder ? folder + '/' + name : name;
 function setServerDiagram(name, tag) {
-  if (name) serverTags.set(name, tag);
+  if (name) { serverTags.set(name, tag); serverFolder = folderOf(name); }
   serverDiagram = name ? { name, yaml: toYaml() } : null;
   document.body.classList.toggle('server-file', !!name);
   if (name || /[?&]diagram=/.test(location.search))
@@ -1028,61 +1047,149 @@ function setServerDiagram(name, tag) {
 }
 function hasUnsavedChanges() { return !!serverDiagram && (!!editing || toYaml() !== serverDiagram.yaml); }
 addEventListener('beforeunload', e => { if (hasUnsavedChanges()) { e.preventDefault(); e.returnValue = ''; } });
-async function serverSave() {
-  if (!libsReady()) return;
+function serverBody() {                            // what Save to server sends, and the name it suggests
   finishEdit();
-  const name = serverDiagram ? serverDiagram.name : slug(doc.title) || 'diagram', tag = serverTags.get(name);
-  const body = new Blob([toYaml()], { type: 'application/yaml' });
-  const put = headers => fetch(`api/diagrams/${name}.yaml`, { method: 'PUT', body, headers });
+  return { blob: new Blob([toYaml()], { type: 'application/yaml' }), name: slug(doc.title) || 'diagram', note: '' };
+}
+async function serverSave() {                       // back where it came from, or ask where a new one goes
+  if (!libsReady()) return;
+  if (serverDiagram) return serverPut(serverDiagram.name);
+  browseServer('save', null, (await serverBody()).name);
+}
+async function serverPut(name, isNew) {             // true if it was saved
+  const { blob, note } = await serverBody(), tag = isNew ? null : serverTags.get(name);
+  const put = headers => fetch(`api/diagrams/${name}.yaml`, { method: 'PUT', body: blob, headers });
   try {
     let r = await put(tag ? { 'If-Match': tag } : { 'If-None-Match': '*' });
     if (r.status === 409) {
       const q = tag ? `${name} has changed on the server since you opened it here, perhaps on another device. Save anyway, replacing that version?`
                     : `A diagram called ${name} is already on the server. Replace it with this one?`;
-      if (!confirm(q)) { toast(`Not saved: ${name} on the server is unchanged.`, true); return; }
+      if (!confirm(q)) { toast(`Not saved: ${name} on the server is unchanged.`, true); return false; }
       r = await put({});
     }
     if (!r.ok) throw new Error(`the server answered ${r.status}.`);
     setServerDiagram(name, r.headers.get('ETag'));
-    toast(`Saved ${name} to the server.`);
-  } catch (e) { toast('Save to server failed: ' + e.message, true); }
+    toast(`Saved ${name} to the server.` + note);
+    return true;
+  } catch (e) { toast('Save to server failed: ' + e.message, true); return false; }
 }
-async function serverOpen() {
-  let found;
-  try { found = await (await fetch('api/diagrams', { cache: 'no-store' })).json(); }
-  catch (e) { toast('Could not reach the server: ' + e.message, true); return; }
-  const list = $('#serverList');
-  list.replaceChildren(...found.map(d => {
-    const b = document.createElement('button'), when = document.createElement('small');
-    b.dataset.name = d.name; b.append(d.name);
-    when.textContent = new Date(d.modified * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-    b.append(when);
+// One dialog walks the folders. To open, it lists each diagram with Move and Delete; to save or move, it asks for a
+// name and puts the diagram (or folder) in the folder shown. A folder is only kept while something is in it.
+async function browseServer(mode, item = null, name = '') {
+  browse = { mode, item };
+  $('#serverFilesTitle').textContent = mode === 'open' ? 'Open from server' : mode === 'save' ? 'Save to server' : `Move ${item.path}`;
+  $('#serverName').hidden = $('#serverNewFolder').hidden = mode === 'open';
+  $('#serverNameIn').value = name;
+  $('#serverGo').textContent = mode === 'save' ? 'Save here' : 'Move here';
+  if (!await showServerFolder(serverFolder)) return;
+  if (!$('#serverFiles').open) $('#serverFiles').showModal();
+  if (mode !== 'open') $('#serverNameIn').select();
+}
+const serverOpen = () => browseServer('open');
+async function showServerFolder(folder) {
+  const picking = browse.mode !== 'open';
+  let got;
+  try {
+    const r = await fetch(`api/diagrams/${folder ? folder + '/' : ''}`, { cache: 'no-store' });
+    if (r.status === 404) throw new Error('it is older than this editor and has no folders. Restart the server to bring it up to date.');
+    if (!r.ok) throw new Error(`it answered ${r.status}.`);
+    got = await r.json();
+  } catch (e) { toast('Could not read the server: ' + e.message, true); return false; }
+  if (!picking && folder && !got.folders.length && !got.files.length) return showServerFolder('');   // the folder has gone
+  serverFolder = folder;
+  const btn = (text, key, value, label) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = text; b.dataset[key] = value;
+    if (label) { b.className = 'smini'; b.setAttribute('aria-label', label); }
     return b;
-  }));
-  if (!found.length) {
-    const p = document.createElement('p');
-    p.textContent = 'No diagrams on the server yet. Save to server puts the current diagram there.';
-    list.append(p);
+  };
+  const row = (...bs) => { const d = document.createElement('div'); d.className = 'srow'; d.append(...bs); return d; };
+  const parts = folder ? folder.split('/') : [];
+  $('#serverPath').replaceChildren(btn('Diagrams', 'folder', ''),
+    ...parts.flatMap((p, i) => ['/', btn(p, 'folder', parts.slice(0, i + 1).join('/'))]));
+  const rows = [];
+  for (const f of got.folders) {
+    const path = inFolder(folder, f);
+    if (browse.item && browse.item.folder && browse.item.path === path) continue;   // a folder can't go inside itself
+    const b = btn(f + '/', 'folder', path);
+    b.classList.add('sfolder');
+    rows.push(picking ? row(b) : row(b, btn('Move…', 'moveFolder', path, `Move the folder ${f}`)));
   }
-  $('#serverFiles').showModal();
+  for (const m of got.files) {
+    const b = btn(leaf(m.name), 'name', m.name), when = document.createElement('small');
+    when.textContent = new Date(m.modified * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    b.append(when);
+    rows.push(picking ? row(b) : row(b, btn('Move…', 'move', m.name, `Move ${leaf(m.name)}`), btn('Delete', 'delete', m.name, `Delete ${leaf(m.name)}`)));
+  }
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.textContent = folder ? 'Nothing here yet. A new folder is kept once something is saved or moved into it.'
+                           : 'No diagrams on the server yet. Save to server puts the current diagram there.';
+    rows.push(p);
+  }
+  $('#serverList').replaceChildren(...rows);
+  return true;
 }
-$('#serverList').addEventListener('click', e => {
-  const b = e.target.closest('button[data-name]');
-  if (!b) return;
-  $('#serverFiles').close();
-  openServerDiagram(b.dataset.name);
+$('#serverFiles').addEventListener('click', e => {
+  const b = e.target.closest('button'), d = b ? b.dataset : {};
+  if (d.folder !== undefined) showServerFolder(d.folder);
+  else if (d.move) browseServer('move', { path: d.move }, leaf(d.move));
+  else if (d.moveFolder) browseServer('move', { path: d.moveFolder, folder: true }, leaf(d.moveFolder));
+  else if (d.delete) serverDelete(d.delete);
+  else if (d.name && browse.mode !== 'open') $('#serverNameIn').value = leaf(d.name);
+  else if (d.name) { $('#serverFiles').close(); openServerDiagram(d.name); }
 });
-$('#serverFiles').addEventListener('close', () => vp.focus({ preventScroll: true }));
+$('#serverNewFolder').onclick = () => {
+  const name = slug(prompt('Name of the new folder:') || '');
+  if (name) showServerFolder(inFolder(serverFolder, name));
+};
+$('#serverName').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = slug($('#serverNameIn').value), to = inFolder(serverFolder, name);
+  if (!name) { toast('Give it a name made of letters or digits.', true); return; }
+  if (browse.mode === 'save') { if (await serverPut(to, true)) $('#serverFiles').close(); return; }
+  const { path, folder } = browse.item;
+  if (to === path) { toast(`${path} is already here. Choose another folder or name.`, true); return; }
+  try {
+    const r = await fetch(folder ? `api/diagrams/${path}/` : `api/diagrams/${path}.yaml`, { method: 'POST', body: JSON.stringify({ to }) });
+    if (r.status === 409) { toast(`Not moved: ${to} is already on the server.`, true); return; }
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `the server answered ${r.status}.`);
+    serverMoved(path, to, folder);
+    toast(`Moved ${path} to ${to}.`);
+    browseServer('open');
+  } catch (e) { toast('Move failed: ' + e.message, true); }
+});
+function serverMoved(from, to, folder) {            // keep this tab's diagram linked to its new name
+  const moved = n => folder ? (n.startsWith(from + '/') ? to + n.slice(from.length) : null) : n === from ? to : null;
+  for (const [n, tag] of [...serverTags]) {
+    const now = moved(n);
+    if (now) { serverTags.delete(n); serverTags.set(now, tag); }
+  }
+  const now = serverDiagram && moved(serverDiagram.name);
+  if (now) { serverDiagram.name = now; try { history.replaceState(null, '', '?diagram=' + now); } catch (e) {} }
+}
+async function serverDelete(name) {
+  if (!confirm(`Delete ${name} from the server? It is moved to the .trash folder on the server.`)) return;
+  try {
+    const r = await fetch(`api/diagrams/${name}.yaml`, { method: 'DELETE' });
+    if (!r.ok && r.status !== 404) throw new Error(`the server answered ${r.status}.`);
+    serverTags.delete(name);
+    if (serverDiagram && serverDiagram.name === name) setServerDiagram(null);        // this tab's copy is no longer on the server
+    toast(`Deleted ${name}.`);
+    showServerFolder(serverFolder);
+  } catch (e) { toast('Delete failed: ' + e.message, true); }
+}
 async function openServerDiagram(name) {
   if (!libsReady()) return;
   try {
-    const r = /^[a-z0-9_]+$/.test(name) ? await fetch(`api/diagrams/${name}.yaml`, { cache: 'no-store' }) : null;
+    const r = KEYPATH.test(name) ? await fetch(`api/diagrams/${name}.yaml`, { cache: 'no-store' }) : null;
     if (!r || r.status === 404) { toast(`${name} is not on the server.`, true); return; }
     if (!r.ok) throw new Error(`the server answered ${r.status}.`);
     const tag = r.headers.get('ETag');
-    if (await openFile(new File([await r.text()], name + '.yaml'))) setServerDiagram(name, tag);
+    if (await openFile(new File([await r.text()], leaf(name) + '.yaml'))) setServerDiagram(name, tag);
   } catch (e) { toast(`Could not open ${name}: ` + e.message, true); }
 }
+$('#serverFiles').addEventListener('close', () => vp.focus({ preventScroll: true }));
 
 $('#fileIn').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); });
 const main = $('main');

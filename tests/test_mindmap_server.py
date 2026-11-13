@@ -130,6 +130,9 @@ def smm(page, maps):
 def server_save(mm, expect='Saved'):
     mm.page.evaluate('document.querySelector("#toast").innerText = ""')
     mm.menu('File', '#bServerSave')
+    mm.page.wait_for_function('document.querySelector("#serverMaps").open || document.querySelector("#toast").innerText !== ""')
+    if mm.page.locator('#serverMaps[open]').count():           # new to the server: the dialog asks where it goes
+        mm.page.click('#serverGo')
     mm.page.wait_for_function('document.querySelector("#toast").innerText !== ""')
     assert expect in mm.message()
 
