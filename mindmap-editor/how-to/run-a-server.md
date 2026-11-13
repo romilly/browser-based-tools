@@ -114,6 +114,7 @@ curl http://localhost:8765/api/maps
 - **It works on the server but not from another device:**
   - Check the firewall. If `sudo ufw status` says it is active, run `sudo ufw allow 8765/tcp`.
   - Try the server's address instead of its name. `hostname -I` shows it. If the address works but the name doesn't, the problem is with names on your network, not with the server.
+  - On an Android phone or tablet, add `.local` to the server's name: `http://raspberrypi.local:8765/`, not `http://raspberrypi:8765/`. A name that works on your computers can fail on Android without it.
 - **The File menu has no server commands:** the page didn't come from the server. Open it from the server's address, not from GitHub Pages or a saved copy.
 
 ## Link to a map
