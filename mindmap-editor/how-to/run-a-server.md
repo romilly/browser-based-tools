@@ -139,7 +139,8 @@ A link to a map that isn't on the server says so, and leaves the current map as 
 Maps can be kept in folders on the server. **Open from server…** shows one folder at a time: choose a folder to look inside it, and use the path at the top of the list to go back up.
 
 - **Save to server** asks where a new map goes. Walk to the folder, change the name if you like, and choose **Save here**. **New folder…** makes a folder to save into.
-- **Move…** beside a map renames it or puts it in another folder: walk to the folder, change the name if you like, and choose **Move here**. **Move…** beside a folder does the same for the folder and everything in it.
+- **Move…** and **Delete** are beside each map in both **Open from server…** and **Save to server**, so you can tidy up while saving.
+- **Move…** beside a map renames it or puts it in another folder: walk to the folder, change the name if you like, and choose **Move here**. **Move…** beside a folder does the same for the folder and everything in it. Afterwards you are back where you started, opening or saving; **Cancel** during a move takes you back too.
 - **Delete** beside a map asks first, then moves the map to a `.trash` folder inside the maps folder, with the date and time added to its name. Nothing empties `.trash`, so to get a map back, move the file out of it and take the date out of its name; delete what you don't want from it yourself.
 
 A folder is kept only while it has a map in it. A new folder appears on the server when you save or move a map into it, and a folder goes when its last map is moved out or deleted.

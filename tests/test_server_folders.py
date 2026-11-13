@@ -336,7 +336,7 @@ def test_a_new_file_is_saved_in_the_folder_and_under_the_name_chosen(ed):
     ed.save_as()
     assert ed.page.input_value('#serverNameIn') == ed.fresh
     assert ed.page.inner_text(ed.dlg + ' h2') == 'Save to server' and ed.page.inner_text('#serverGo') == 'Save here'
-    assert not ed.page.locator('#serverList .smini').count()                        # no Move or Delete while saving
+    assert ed.page.locator('#serverList button[aria-label="Move the folder projects"]').count() == 1   # Move while saving too
     ed.enter('projects')
     ed.name('My Plan 2')
     ed.toast('Saved projects/my_plan_2 to the server')
@@ -506,3 +506,37 @@ def test_a_server_from_before_folders_says_so(ed):
     ed.app.menu('File', '#bServerOpen')
     ed.toast('older than this editor')
     assert not ed.page.locator(ed.dlg + '[open]').count()
+
+
+def test_move_and_delete_are_offered_while_saving_and_saving_carries_on(ed):
+    ed.put('projects/plan', 'projects/old')
+    ed.save_as()
+    ed.enter('projects')
+    ed.page.fill('#serverNameIn', 'Kept Name')
+    ed.answers.append('yes')
+    ed.page.click('#serverList button[aria-label="Delete old"]')
+    ed.toast('Deleted projects/old')
+    ed.page.wait_for_selector(ed.file('projects/old'), state='detached')
+    assert ed.page.inner_text(ed.dlg + ' h2') == 'Save to server' and ed.page.input_value('#serverNameIn') == 'Kept Name'
+    ed.page.click('#serverList button[aria-label="Move plan"]')
+    ed.page.wait_for_function('document.querySelector("#serverGo").textContent === "Move here"')
+    ed.page.wait_for_selector('#serverList .smini', state='detached')                # none while choosing where a move goes
+    ed.name('Plan 2026')
+    ed.toast('Moved projects/plan to projects/plan_2026')
+    ed.page.wait_for_function('document.querySelector("#serverGo").textContent === "Save here"')
+    assert ed.page.inner_text(ed.dlg + ' h2') == 'Save to server' and ed.page.input_value('#serverNameIn') == 'Kept Name'
+    ed.page.click('#serverGo')
+    ed.toast('Saved projects/kept_name to the server')
+    assert ed.has('projects/kept_name') and ed.has('projects/plan_2026') and not ed.has('projects/plan')
+
+
+def test_cancel_during_a_move_goes_back_to_what_you_were_doing(ed):
+    ed.put('garden')
+    ed.save_as()
+    ed.page.click('#serverList button[aria-label="Move garden"]')
+    ed.page.wait_for_function('document.querySelector("#serverGo").textContent === "Move here"')
+    ed.page.click('#serverCancel')
+    ed.page.wait_for_function('document.querySelector("#serverGo").textContent === "Save here"')
+    assert ed.page.locator(ed.dlg + '[open]').count() and ed.page.input_value('#serverNameIn') == ed.fresh
+    ed.page.click('#serverCancel')
+    assert not ed.page.locator(ed.dlg + '[open]').count() and ed.has('garden')

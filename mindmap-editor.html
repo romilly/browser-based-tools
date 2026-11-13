@@ -280,7 +280,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
   <nav id="serverPath" aria-label="Folder"></nav>
   <div id="serverList"></div>
   <form id="serverName" hidden><label for="serverNameIn">Name</label><input id="serverNameIn" autocomplete="off" spellcheck="false"><button id="serverGo">Save here</button></form>
-  <form method="dialog"><button type="button" id="serverNewFolder" hidden>New folder…</button><button>Cancel</button></form>
+  <form method="dialog"><button type="button" id="serverNewFolder" hidden>New folder…</button><button id="serverCancel">Cancel</button></form>
 </dialog>
 <input id="imageIn" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
 <div id="toast" role="status" hidden></div>
@@ -398,7 +398,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <p><b>Export as Markdown</b> (also in the File menu) downloads the map as a <code>.zip</code> file of linked Markdown pages, one per branch, in folders arranged like the map, with the images. Each page has the branch's icons, title, picture, web link and note, then links to the branches under it and to its connectors' targets, and at the bottom to the previous and next branch and back up to its parent. Notes and maths are copied as they are, so they show on GitHub or in Obsidian. The editor can't open an export again: use Save for that.</p>
       <p>The YAML does not record which side of the centre a branch is on, so an opened map shares its branches between left and right.</p>
       <p><b>Open from server</b> and <b>Save to server</b> appear in the File menu when the editor comes from a mind map server on your own network. The server keeps maps in one folder, so all your devices share them. If a map has changed on another device since you opened it here, Save to server asks before replacing it.</p>
-      <p>Maps on the server can be kept in folders. Open from server shows one folder at a time: choose a folder to look inside it, and use the path at the top to go back up. Each map has <b>Move…</b>, to rename it or put it in another folder, and <b>Delete</b>, which moves it to a <code>.trash</code> folder on the server. Saving a new map asks for its name and folder; <b>New folder…</b> makes one, which is kept once a map is in it.</p>
+      <p>Maps on the server can be kept in folders. Open from server and Save to server show one folder at a time: choose a folder to look inside it, and use the path at the top to go back up. In both, each map has <b>Move…</b>, to rename it or put it in another folder, and <b>Delete</b>, which moves it to a <code>.trash</code> folder on the server. Saving a new map asks for its name and folder; <b>New folder…</b> makes one, which is kept once a map is in it.</p>
       <p>A map on the server has its own address, which the address bar shows while it is open, such as <code>…:8765/?map=garden</code>; use it to link to the map from notes. While a map from the server is open, Ctrl+S saves it back to the server under the same name, and the browser asks before you close the tab with changes not yet saved there.</p>
       <p>The current map is also kept in this browser between visits, but not on other browsers or devices, so use Save to keep a copy.</p>
     </section>
@@ -1072,7 +1072,8 @@ async function openFile(file) {
 const serverTags = new Map();                       // map name -> ETag of the version last opened or saved here
 let serverMap = null;                               // { name, yaml } of the map from the server, as last opened or saved
 let serverFolder = '';                              // the folder the dialog last showed
-let browse = { mode: 'open', item: null };          // what the dialog is for: open, save, or move (item = { path, folder })
+let browse = { mode: 'open', item: null };          // what the dialog is for: open, save, or move (item = { path, folder },
+                                                    // back = { mode, name } to return to when the move is done or cancelled)
 const serverReady = fetch('api/maps', { cache: 'no-store' })
   .then(r => r.ok && /json/.test(r.headers.get('Content-Type') || '') ? r.json() : null)
   .then(list => {
@@ -1123,8 +1124,8 @@ async function serverPut(name, isNew) {             // true if it was saved
 }
 // One dialog walks the folders. To open, it lists each map with Move and Delete; to save or move, it asks for a
 // name and puts the map (or folder) in the folder shown. A folder is only kept while something is in it.
-async function browseServer(mode, item = null, name = '') {
-  browse = { mode, item };
+async function browseServer(mode, item = null, name = '', back = null) {
+  browse = { mode, item, back };
   $('#serverMapsTitle').textContent = mode === 'open' ? 'Open from server' : mode === 'save' ? 'Save to server' : `Move ${item.path}`;
   $('#serverName').hidden = $('#serverNewFolder').hidden = mode === 'open';
   $('#serverNameIn').value = name;
@@ -1134,8 +1135,15 @@ async function browseServer(mode, item = null, name = '') {
   if (mode !== 'open') $('#serverNameIn').select();
 }
 const serverOpen = () => browseServer('open');
+function startMove(item) {                          // from Open or Save: walk to where it goes, then come back
+  browseServer('move', item, leaf(item.path), { mode: browse.mode, name: $('#serverNameIn').value });
+}
+function endMove() {
+  const back = browse.back || { mode: 'open', name: '' };
+  browseServer(back.mode, null, back.name);
+}
 async function showServerFolder(folder) {
-  const picking = browse.mode !== 'open';
+  const picking = browse.mode === 'move';          // choosing where a move goes: no Move or Delete in the rows
   let got;
   try {
     const r = await fetch(`api/maps/${folder ? folder + '/' : ''}`, { cache: 'no-store' });
@@ -1143,7 +1151,7 @@ async function showServerFolder(folder) {
     if (!r.ok) throw new Error(`it answered ${r.status}.`);
     got = await r.json();
   } catch (e) { toast('Could not read the server: ' + e.message, true); return false; }
-  if (!picking && folder && !got.folders.length && !got.files.length) return showServerFolder('');   // the folder has gone
+  if (browse.mode === 'open' && folder && !got.folders.length && !got.files.length) return showServerFolder('');   // the folder has gone
   serverFolder = folder;
   const btn = (text, key, value, label) => {
     const b = document.createElement('button');
@@ -1181,12 +1189,13 @@ async function showServerFolder(folder) {
 $('#serverMaps').addEventListener('click', e => {
   const b = e.target.closest('button'), d = b ? b.dataset : {};
   if (d.folder !== undefined) showServerFolder(d.folder);
-  else if (d.move) browseServer('move', { path: d.move }, leaf(d.move));
-  else if (d.moveFolder) browseServer('move', { path: d.moveFolder, folder: true }, leaf(d.moveFolder));
+  else if (d.move) startMove({ path: d.move });
+  else if (d.moveFolder) startMove({ path: d.moveFolder, folder: true });
   else if (d.delete) serverDelete(d.delete);
   else if (d.map && browse.mode !== 'open') $('#serverNameIn').value = leaf(d.map);
   else if (d.map) { $('#serverMaps').close(); openServerMap(d.map); }
 });
+$('#serverCancel').onclick = e => { if (browse.mode === 'move') { e.preventDefault(); endMove(); } };
 $('#serverNewFolder').onclick = () => {
   const name = slug(prompt('Name of the new folder:') || '');
   if (name) showServerFolder(inFolder(serverFolder, name));
@@ -1204,7 +1213,7 @@ $('#serverName').addEventListener('submit', async e => {
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `the server answered ${r.status}.`);
     serverMoved(path, to, folder);
     toast(`Moved ${path} to ${to}.`);
-    browseServer('open');
+    endMove();
   } catch (e) { toast('Move failed: ' + e.message, true); }
 });
 function serverMoved(from, to, folder) {            // keep this tab's map linked to its new name

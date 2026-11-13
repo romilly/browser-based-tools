@@ -224,7 +224,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
   <nav id="serverPath" aria-label="Folder"></nav>
   <div id="serverList"></div>
   <form id="serverName" hidden><label for="serverNameIn">Name</label><input id="serverNameIn" autocomplete="off" spellcheck="false"><button id="serverGo">Save here</button></form>
-  <form method="dialog"><button type="button" id="serverNewFolder" hidden>New folder…</button><button>Cancel</button></form>
+  <form method="dialog"><button type="button" id="serverNewFolder" hidden>New folder…</button><button id="serverCancel">Cancel</button></form>
 </dialog>
 
 <main>
@@ -304,7 +304,7 @@ main.drop #vp{box-shadow:inset 0 0 0 3px var(--accent)}
       <h3>Saving</h3>
       <p><b>Save</b> downloads the diagram as a YAML file named after its title; <b>Open</b> reads one back, and you can also drop a file on the diagram. The format is defined by <code>diagram-schema.json</code>. The diagram is also kept in this browser between visits, but not shared with other browsers or devices.</p>
       <p>When the editor comes from the mind map server on your network (<code>mindmap_server.py</code>), the File menu also has <b>Open from server…</b> and <b>Save to server</b>, so every device sees the same diagrams. While a diagram from the server is open, the address bar links to it (for example from a note), <kbd>Ctrl</kbd>+<kbd>S</kbd> saves it back to the server, and the browser asks before you close the tab with changes not yet saved there.</p>
-      <p>Diagrams on the server can be kept in folders. Open from server shows one folder at a time: choose a folder to look inside it, and use the path at the top to go back up. Each diagram has <b>Move…</b>, to rename it or put it in another folder, and <b>Delete</b>, which moves it to a <code>.trash</code> folder on the server. Saving a new diagram asks for its name and folder; <b>New folder…</b> makes one, which is kept once a diagram is in it.</p>
+      <p>Diagrams on the server can be kept in folders. Open from server and Save to server show one folder at a time: choose a folder to look inside it, and use the path at the top to go back up. In both, each diagram has <b>Move…</b>, to rename it or put it in another folder, and <b>Delete</b>, which moves it to a <code>.trash</code> folder on the server. Saving a new diagram asks for its name and folder; <b>New folder…</b> makes one, which is kept once a diagram is in it.</p>
     </section>
   </div>
 </div>
@@ -1025,7 +1025,8 @@ function newDiagram() {
 const serverTags = new Map();                       // diagram name -> ETag of the version last opened or saved here
 let serverDiagram = null;                               // { name, yaml } of the diagram from the server, as last opened or saved
 let serverFolder = '';                              // the folder the dialog last showed
-let browse = { mode: 'open', item: null };          // what the dialog is for: open, save, or move (item = { path, folder })
+let browse = { mode: 'open', item: null };          // what the dialog is for: open, save, or move (item = { path, folder },
+                                                    // back = { mode, name } to return to when the move is done or cancelled)
 const serverReady = fetch('api/diagrams', { cache: 'no-store' })
   .then(r => r.ok && /json/.test(r.headers.get('Content-Type') || '') ? r.json() : null)
   .then(list => {
@@ -1075,8 +1076,8 @@ async function serverPut(name, isNew) {             // true if it was saved
 }
 // One dialog walks the folders. To open, it lists each diagram with Move and Delete; to save or move, it asks for a
 // name and puts the diagram (or folder) in the folder shown. A folder is only kept while something is in it.
-async function browseServer(mode, item = null, name = '') {
-  browse = { mode, item };
+async function browseServer(mode, item = null, name = '', back = null) {
+  browse = { mode, item, back };
   $('#serverFilesTitle').textContent = mode === 'open' ? 'Open from server' : mode === 'save' ? 'Save to server' : `Move ${item.path}`;
   $('#serverName').hidden = $('#serverNewFolder').hidden = mode === 'open';
   $('#serverNameIn').value = name;
@@ -1086,8 +1087,15 @@ async function browseServer(mode, item = null, name = '') {
   if (mode !== 'open') $('#serverNameIn').select();
 }
 const serverOpen = () => browseServer('open');
+function startMove(item) {                          // from Open or Save: walk to where it goes, then come back
+  browseServer('move', item, leaf(item.path), { mode: browse.mode, name: $('#serverNameIn').value });
+}
+function endMove() {
+  const back = browse.back || { mode: 'open', name: '' };
+  browseServer(back.mode, null, back.name);
+}
 async function showServerFolder(folder) {
-  const picking = browse.mode !== 'open';
+  const picking = browse.mode === 'move';          // choosing where a move goes: no Move or Delete in the rows
   let got;
   try {
     const r = await fetch(`api/diagrams/${folder ? folder + '/' : ''}`, { cache: 'no-store' });
@@ -1095,7 +1103,7 @@ async function showServerFolder(folder) {
     if (!r.ok) throw new Error(`it answered ${r.status}.`);
     got = await r.json();
   } catch (e) { toast('Could not read the server: ' + e.message, true); return false; }
-  if (!picking && folder && !got.folders.length && !got.files.length) return showServerFolder('');   // the folder has gone
+  if (browse.mode === 'open' && folder && !got.folders.length && !got.files.length) return showServerFolder('');   // the folder has gone
   serverFolder = folder;
   const btn = (text, key, value, label) => {
     const b = document.createElement('button');
@@ -1133,12 +1141,13 @@ async function showServerFolder(folder) {
 $('#serverFiles').addEventListener('click', e => {
   const b = e.target.closest('button'), d = b ? b.dataset : {};
   if (d.folder !== undefined) showServerFolder(d.folder);
-  else if (d.move) browseServer('move', { path: d.move }, leaf(d.move));
-  else if (d.moveFolder) browseServer('move', { path: d.moveFolder, folder: true }, leaf(d.moveFolder));
+  else if (d.move) startMove({ path: d.move });
+  else if (d.moveFolder) startMove({ path: d.moveFolder, folder: true });
   else if (d.delete) serverDelete(d.delete);
   else if (d.name && browse.mode !== 'open') $('#serverNameIn').value = leaf(d.name);
   else if (d.name) { $('#serverFiles').close(); openServerDiagram(d.name); }
 });
+$('#serverCancel').onclick = e => { if (browse.mode === 'move') { e.preventDefault(); endMove(); } };
 $('#serverNewFolder').onclick = () => {
   const name = slug(prompt('Name of the new folder:') || '');
   if (name) showServerFolder(inFolder(serverFolder, name));
@@ -1156,7 +1165,7 @@ $('#serverName').addEventListener('submit', async e => {
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `the server answered ${r.status}.`);
     serverMoved(path, to, folder);
     toast(`Moved ${path} to ${to}.`);
-    browseServer('open');
+    endMove();
   } catch (e) { toast('Move failed: ' + e.message, true); }
 });
 function serverMoved(from, to, folder) {            // keep this tab's diagram linked to its new name
