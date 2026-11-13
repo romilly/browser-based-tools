@@ -1110,3 +1110,145 @@ def test_help_explains_markdown_export(mm):
     mm.page.click('#bHelp')
     section = mm.page.locator('#dlg section', has=mm.page.locator('h3', has_text='Saving'))
     assert 'Export as Markdown' in section.inner_text()
+
+
+# --- keys: redo, siblings, folding, moving the selection, editing, closing Help ---
+
+def selected(mm):
+    return mm.page.inner_text('.node.sel .t')
+
+
+def press(mm, *keys):
+    for key in keys:
+        mm.page.keyboard.press(key)
+
+
+def test_ctrl_y_redoes_what_was_undone(mm):
+    mm.node('SQLite browser').click()
+    press(mm, 'Delete')
+    press(mm, 'Control+z')
+    assert 'SQLite browser' in mm.titles()
+    press(mm, 'Control+y')
+    assert 'SQLite browser' not in mm.titles()
+    assert mm.page.is_disabled('#bRedo')
+    press(mm, 'Control+z')
+    mm.page.click('#bRedo')
+    assert 'SQLite browser' not in mm.titles()
+
+
+def test_a_new_change_leaves_nothing_to_redo(mm):
+    mm.node('SQLite browser').click()
+    press(mm, 'Delete', 'Control+z')
+    assert mm.page.is_enabled('#bRedo')
+    mm.node('MIT License').click()
+    press(mm, 'Delete')
+    assert mm.page.is_disabled('#bRedo')
+    press(mm, 'Control+y')                      # does nothing
+    assert 'SQLite browser' in mm.titles() and 'MIT License' not in mm.titles()
+
+
+def test_enter_adds_a_sibling_just_below_the_selected_branch(mm, tmp_path):
+    mm.node('Foreign keys').click()
+    press(mm, 'Enter')
+    mm.page.keyboard.type('Indexes')
+    press(mm, 'Enter')                          # finishes the title
+    assert selected(mm) == 'Indexes'
+    _, data = read_zip(mm.save(tmp_path))
+    assert list(data['root']['children']['crudulator']['children'])[:3] == ['foreign_keys', 'indexes', 'multiple_tables']
+
+
+def test_enter_on_the_root_adds_a_main_branch(mm, tmp_path):
+    mm.node('Toolbox').click()
+    press(mm, 'Enter')
+    mm.page.keyboard.type('Ideas')
+    press(mm, 'Enter')
+    _, data = read_zip(mm.save(tmp_path))
+    assert 'ideas' in data['root']['children']
+
+
+def test_the_sibling_button_adds_a_sibling(mm):
+    mm.node('MIT License').click()
+    mm.page.click('#bSib')
+    mm.page.keyboard.type('Changelog')
+    press(mm, 'Enter')
+    assert mm.titles().index('Changelog') == mm.titles().index('MIT License') + 1
+
+
+def test_space_folds_a_branch_and_shows_how_many_nodes_it_hides(mm):
+    mm.node('CRUDulator').click()
+    press(mm, 'Space')
+    assert 'Foreign keys' not in mm.titles()
+    assert mm.node('CRUDulator').locator('.fold').inner_text() == '4'
+    press(mm, 'Space')
+    assert 'Foreign keys' in mm.titles()
+    assert mm.node('CRUDulator').locator('.fold').count() == 0
+    press(mm, 'Control+z')                      # folding can be undone
+    assert 'Foreign keys' not in mm.titles()
+
+
+def test_space_does_nothing_on_a_branch_without_children_or_on_the_root(mm):
+    for title in ['Foreign keys', 'Toolbox']:
+        mm.node(title).click()
+        press(mm, 'Space')
+    assert mm.page.locator('.node .fold').count() == 0
+    assert mm.page.is_disabled('#bUndo')
+
+
+def test_arrow_keys_move_the_selection_on_the_right_of_the_root(mm):
+    mm.node('Toolbox').click()
+    steps = [('ArrowRight', 'CRUDulator'), ('ArrowDown', 'Mind map editor'), ('ArrowDown', 'Mind map editor'),
+             ('ArrowUp', 'CRUDulator'), ('ArrowUp', 'CRUDulator'), ('ArrowRight', 'Foreign keys'),
+             ('ArrowDown', 'Multiple tables'), ('ArrowRight', 'Multiple tables'),
+             ('ArrowLeft', 'CRUDulator'), ('ArrowLeft', 'Toolbox')]
+    for key, title in steps:
+        press(mm, key)
+        assert selected(mm) == title, f'after {key}'
+
+
+def test_arrow_keys_are_mirrored_on_the_left_of_the_root(mm):
+    mm.node('Toolbox').click()
+    steps = [('ArrowLeft', 'SQLite browser'), ('ArrowLeft', 'SQLite browser'), ('ArrowDown', 'Repo housekeeping'),
+             ('ArrowLeft', 'MIT License'), ('ArrowDown', 'Playwright tests in a local venv'),
+             ('ArrowRight', 'Repo housekeeping'), ('ArrowRight', 'Toolbox'), ('ArrowUp', 'Toolbox')]
+    for key, title in steps:
+        press(mm, key)
+        assert selected(mm) == title, f'after {key}'
+
+
+def test_an_arrow_key_into_a_folded_branch_unfolds_it(mm):
+    mm.node('CRUDulator').click()
+    press(mm, 'Space', 'ArrowRight')
+    assert selected(mm) == 'Foreign keys'
+    assert mm.node('CRUDulator').locator('.fold').count() == 0
+
+
+def test_f2_edits_the_title_and_escape_gives_up_the_edit(mm):
+    mm.node('Foreign keys').click()
+    press(mm, 'F2')
+    mm.page.keyboard.type('Links')
+    press(mm, 'Enter')
+    assert 'Links' in mm.titles() and 'Foreign keys' not in mm.titles()
+    press(mm, 'F2')
+    mm.page.keyboard.type('Oops')
+    press(mm, 'Escape')
+    assert 'Links' in mm.titles() and 'Oops' not in mm.titles()
+
+
+def test_the_edit_button_edits_the_title(mm):
+    mm.node('MIT License').click()
+    mm.page.click('#bEdit')
+    mm.page.keyboard.type('Licence')
+    press(mm, 'Enter')
+    assert 'Licence' in mm.titles() and 'MIT License' not in mm.titles()
+
+
+def test_help_closes_with_its_button_escape_or_a_click_outside(mm):
+    for close in [lambda: mm.page.click('#hClose'), lambda: press(mm, 'Escape'),
+                  lambda: mm.page.mouse.click(5, 5)]:
+        mm.page.click('#bHelp')
+        assert mm.page.is_visible('#dlg')
+        close()
+        assert mm.page.is_hidden('#dlg')
+    mm.node('Foreign keys').click()
+    press(mm, 'Delete')                         # keys go to the map again
+    assert 'Foreign keys' not in mm.titles()
