@@ -19,6 +19,16 @@ The API, which the editors use (the same for diagrams, with /api/diagrams and <n
     PUT /api/maps/<name>.zip   -> stores the zip. With If-Match: <etag>, refuses (409) if the map has
                                   changed since; with If-None-Match: *, refuses (409) if it already exists
 <name> is an editor key: lower-case letters, digits and underscores.
+
+Maps can be kept in folders: <name> may be a path of keys such as projects/toolbox/plan. A folder is there
+while it holds a map; saving or moving a map into a new folder makes it, and an emptied folder goes.
+    GET /api/maps/             -> {"folder", "folders": [names], "files": [as above, newest first]} at the top
+    GET /api/maps/<folder>/    -> the same for one folder ("name" is the whole path)
+    DELETE /api/maps/<name>.zip  -> moves the map into .trash inside the maps folder, with the time in its
+                                    name. With If-Match: <etag>, refuses (409) if the map has changed since
+    POST /api/maps/<name>.zip  with {"to": "<new name>"} -> moves or renames the map; 409 if one is there
+    POST /api/maps/<folder>/   with {"to": "<new folder>"} -> moves or renames the folder and all in it
+Nothing empties .trash; delete what you no longer want from it yourself.
 """
 import hashlib
 import http.server
@@ -26,6 +36,7 @@ import json
 import os
 import re
 import threading
+import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -34,7 +45,10 @@ HERE = Path(__file__).resolve().parent if '__file__' in globals() else None
 EDITOR = HERE / 'mindmap-editor.html' if HERE else None
 DIAGRAM_EDITOR = HERE / 'diagram-editor.html' if HERE else None
 MAX_BYTES = 200 * 1024 * 1024
-_FILE = re.compile(r'^/api/(maps|diagrams)/([a-z0-9_]+)\.(zip|yaml)$')
+_KEY = r'[a-z0-9_]+'
+_PATH = rf'{_KEY}(?:/{_KEY})*'
+_FILE = re.compile(rf'^/api/(maps|diagrams)/({_PATH})\.(zip|yaml)$')
+_FOLDER = re.compile(rf'^/api/(maps|diagrams)/(?:({_PATH})/)?$')
 
 
 def _is_zip(data):
@@ -80,12 +94,59 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _error(self, status, text):
         self._send(status, json.dumps({'error': text}).encode())
 
+    def _taken(self, kind, target):
+        """True if target is in a folder kept for another kind (by default diagrams are in a folder inside the maps)."""
+        mine = self.folders[kind]
+        return any(k != kind and mine in f.parents and (target == f or f in target.parents)
+                   for k, f in self.folders.items())
+
     def _file(self, path):
         """(kind, file path) for /api/<kind>/<name>.<ext> with the right extension for its kind, else None."""
         m = _FILE.match(path)
         if m and _KINDS[m[1]]['ext'] == m[3]:
-            return m[1], self.folders[m[1]] / f'{m[2]}.{m[3]}'
+            target = self.folders[m[1]] / f'{m[2]}.{m[3]}'
+            if not self._taken(m[1], target):
+                return m[1], target
         return None
+
+    def _folder(self, path):
+        """(kind, folder path) for /api/<kind>/ or /api/<kind>/<folder>/, else None."""
+        m = _FOLDER.match(path)
+        if m:
+            target = self.folders[m[1]] / (m[2] or '')
+            if not self._taken(m[1], target):
+                return m[1], target
+        return None
+
+    def _files(self, kind, folder, deep=False):
+        """The files of this kind in a folder (and, if deep, in the folders inside it) whose names are editor keys."""
+        root, ext = self.folders[kind], _KINDS[kind]['ext']
+        for f in (folder.rglob if deep else folder.glob)('*.' + ext) if folder.is_dir() else []:
+            keys = f.relative_to(root).with_suffix('').parts
+            if f.is_file() and all(re.fullmatch(_KEY, k) for k in keys) and not self._taken(kind, f):
+                yield f
+
+    def _listing(self, kind, folder):
+        root, found = self.folders[kind], []
+        for f in self._files(kind, folder):
+            data = f.read_bytes()
+            found.append({'name': f.relative_to(root).with_suffix('').as_posix(), 'modified': f.stat().st_mtime,
+                          'size': len(data), 'etag': _etag(data)})
+        found.sort(key=lambda m: -m['modified'])
+        inside = sorted(d.name for d in (folder.iterdir() if folder.is_dir() else [])
+                        if d.is_dir() and re.fullmatch(_KEY, d.name) and any(self._files(kind, d, deep=True)))
+        return {'folder': folder.relative_to(root).as_posix() if folder != root else '', 'folders': inside,
+                'files': found}
+
+    def _prune(self, kind, folder):
+        """Remove a folder left empty, and those above it that it leaves empty."""
+        root = self.folders[kind]
+        while root in folder.parents:
+            try:
+                folder.rmdir()
+            except OSError:
+                break
+            folder = folder.parent
 
     def do_GET(self):
         path = self.path.split('?')[0]
@@ -94,19 +155,69 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return self._send(200, page.read_bytes(), 'text/html; charset=utf-8')
         kind = path[len('/api/'):] if path.startswith('/api/') else None
         if kind in _KINDS:
-            ext, found = _KINDS[kind]['ext'], []
-            folder = self.folders[kind]
-            for f in folder.glob('*.' + ext) if folder.is_dir() else []:
-                if re.fullmatch(r'[a-z0-9_]+', f.stem):
-                    data = f.read_bytes()
-                    found.append({'name': f.stem, 'modified': f.stat().st_mtime, 'size': len(data), 'etag': _etag(data)})
-            found.sort(key=lambda m: -m['modified'])
-            return self._send(200, json.dumps(found).encode())
+            return self._send(200, json.dumps(self._listing(kind, self.folders[kind])['files']).encode())
+        hit = self._folder(path)
+        if hit:
+            return self._send(200, json.dumps(self._listing(*hit)).encode())
         hit = self._file(path)
         if hit and hit[1].is_file():
             data = hit[1].read_bytes()
             return self._send(200, data, _KINDS[hit[0]]['ctype'], [('ETag', _etag(data))])
         self._error(404, 'not found')
+
+    def do_DELETE(self):
+        hit = self._file(self.path.split('?')[0])
+        if not hit:
+            return self._error(404, 'not found')
+        kind, target = hit
+        k, root = _KINDS[kind], self.folders[kind]
+        with _lock:
+            if not target.is_file():
+                return self._error(404, 'not found')
+            wanted = self.headers.get('If-Match')
+            if wanted and _etag(target.read_bytes()) != wanted:
+                return self._error(409, f"the {k['noun']} has changed since it was opened")
+            stamp, n = time.strftime('%Y%m%d-%H%M%S'), 0
+            while True:
+                name = f"{target.stem}.{stamp}{'-' + str(n) if n else ''}{target.suffix}"
+                bin_ = root / '.trash' / target.relative_to(root).with_name(name)
+                if not bin_.exists():
+                    break
+                n += 1
+            bin_.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(target, bin_)
+            self._prune(kind, target.parent)
+        self._send(200, b'{}')
+
+    def do_POST(self):
+        path = self.path.split('?')[0]
+        file, folder = self._file(path), self._folder(path)
+        if not file and not (folder and folder[1] != self.folders[folder[0]]):
+            return self._error(404, 'not found')
+        kind, source = file or folder
+        k, root = _KINDS[kind], self.folders[kind]
+        try:
+            to = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 10000)))['to']
+        except (ValueError, KeyError, TypeError):
+            to = None
+        if not isinstance(to, str) or not re.fullmatch(_PATH, to):
+            return self._error(400, 'send {"to": "<name>"}, a path of lower-case letters, digits and underscores')
+        target = root / (f"{to}.{k['ext']}" if file else to)
+        if self._taken(kind, target):
+            return self._error(400, 'that folder is kept for something else')
+        if folder and (target == source or source in target.parents):
+            return self._error(400, "a folder can't be moved into itself")
+        with _lock:
+            if not (source.is_file() if file else any(self._files(kind, source, deep=True))):
+                return self._error(404, 'not found')
+            if target.exists():
+                what = f"a {k['noun']}" if file else 'a folder'
+                return self._error(409, f'{what} with that name is already here')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(source, target)
+            self._prune(kind, source.parent)
+            tag = [('ETag', _etag(target.read_bytes()))] if file else []
+        self._send(200, b'{}', headers=tag)
 
     def do_PUT(self):
         path = self.path.split('?')[0]
