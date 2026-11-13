@@ -8,7 +8,8 @@ paste it into a Jupyter notebook and run:
     srv.shutdown()                                # to stop it
 
 The Mind Map Editor is at the top, http://<this computer>:8765/, and the Diagram Editor at
-http://<this computer>:8765/diagram-editor.html. Diagrams are kept in a 'diagrams' folder inside the maps folder,
+http://<this computer>:8765/diagram-editor.html; http://<this computer>:8765/home links to both and to their
+documentation (each editor's logo goes there). Diagrams are kept in a 'diagrams' folder inside the maps folder,
 unless you choose another with diagrams=.
 
 There is no password: anyone who can reach the port can read and change the maps and diagrams.
@@ -44,6 +45,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent if '__file__' in globals() else None
 EDITOR = HERE / 'mindmap-editor.html' if HERE else None
 DIAGRAM_EDITOR = HERE / 'diagram-editor.html' if HERE else None
+HOME = HERE / 'home.html' if HERE else None
 MAX_BYTES = 200 * 1024 * 1024
 _KEY = r'[a-z0-9_]+'
 _PATH = rf'{_KEY}(?:/{_KEY})*'
@@ -267,9 +269,11 @@ def start_mind_map_server(folder, port=8765, host='0.0.0.0', editor=None, diagra
         raise FileNotFoundError(f'{editor} not found; pass editor= the path of mindmap-editor.html')
     diagram_editor = Path(diagram_editor or DIAGRAM_EDITOR or 'diagram-editor.html').expanduser()
     diagrams = Path(diagrams).expanduser() if diagrams else folder / 'diagrams'
+    home = Path(HOME or 'home.html')
     handler = type('Handler', (_Handler,), {
         'folders': {'maps': folder, 'diagrams': diagrams},
-        'pages': {'/': editor, '/mindmap-editor.html': editor, '/diagram-editor.html': diagram_editor},
+        'pages': {'/': editor, '/mindmap-editor.html': editor, '/diagram-editor.html': diagram_editor,
+                  '/home': home, '/home.html': home},
     })
     srv = http.server.ThreadingHTTPServer((host, port), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

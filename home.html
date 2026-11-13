@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Browser-based tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f7f7; --canvas:#ffffff; --fg:#1d282c; --muted:#5d6e74; --line:#d6dfe1; --accent:#2b6888;
+  --ui:'IBM Plex Sans',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#121819; --canvas:#172022; --fg:#e2eaec; --muted:#93a4a9; --line:#2b383b; --accent:#86bddb;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 var(--ui);
+  padding:max(24px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 32px max(16px,env(safe-area-inset-left))}
+main{max-width:640px;margin:0 auto}
+h1{font-size:22px;font-weight:600;margin:0 0 4px}
+.intro{color:var(--muted);margin:0 0 24px}
+.tool{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 14px}
+.open{display:inline-flex;align-items:center;gap:10px;color:var(--fg);text-decoration:none;font-size:18px;font-weight:600}
+.open:hover .name{text-decoration:underline;text-decoration-color:var(--accent)}
+.logo{display:inline-grid;place-items:center;flex:none;width:36px;height:36px;border-radius:9px;
+  background:var(--accent);color:var(--canvas);font:600 16px/1 var(--mono);letter-spacing:0}
+.tool p{margin:8px 0 6px;color:var(--muted)}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+footer{margin-top:24px;font-size:14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Browser-based tools</h1>
+  <p class="intro">On this server. Maps and diagrams you save to the server are kept here, so every device on your network sees them.</p>
+
+  <section class="tool">
+    <a class="open" href="./"><span class="logo" aria-hidden="true">mm</span><span class="name">Mind Map Editor</span></a>
+    <p>Freeplane-style mind maps with notes in Markdown, maths, images, icons, web links and connectors.</p>
+    <a href="https://romilly.github.io/browser-based-tools/mindmap-editor/">Documentation</a>
+  </section>
+
+  <section class="tool">
+    <a class="open" href="diagram-editor.html"><span class="logo" aria-hidden="true">dg</span><span class="name">Diagram Editor</span></a>
+    <p>Diagrams of nodes joined at named ports, saved as YAML for programs to read.</p>
+    <a href="https://romilly.github.io/browser-based-tools/diagram-editor/">Documentation</a>
+  </section>
+
+  <footer>
+    More tools: <a href="https://romilly.github.io/browser-based-tools/">the full collection on GitHub Pages</a> ·
+    source: <a href="https://github.com/romilly/browser-based-tools">romilly/browser-based-tools</a>
+  </footer>
+</main>
+</body>
+</html>

@@ -509,7 +509,8 @@ def test_the_phone_header_has_two_tidy_rows(dg):
     assert top('#mbFile') == pytest.approx(top('#bUndo'), abs=3)
     assert top('#bNode') == top('#bEdit') == top('#bDel') > top('#mbFile') + 10
     assert dg.page.locator('header').bounding_box()['height'] < 80
-    assert not dg.page.locator('header h1').is_visible()
+    assert dg.page.locator('header .logo').is_visible()                       # the tile stays, the name goes
+    assert dg.page.locator('header .name').bounding_box()['width'] <= 1
 
 
 # --- drawing edges: Connect mode makes a port at each end, where the edge starts and ends ---

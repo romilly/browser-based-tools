@@ -18,6 +18,10 @@ Design a database of linked tables and get a data-entry application for it: list
 
 Build mind maps in the style of Freeplane, with notes in Markdown, maths, images, icons, web links and connectors.
 
+## [Diagram Editor](diagram-editor/)
+
+Draw diagrams of nodes joined at named ports, such as flowcharts and data-flow pipelines, saved as YAML for programs to read.
+
 ---
 
 The tools are open source, under the MIT License: [romilly/browser-based-tools on GitHub](https://github.com/romilly/browser-based-tools).

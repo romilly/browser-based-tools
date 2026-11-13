@@ -919,7 +919,8 @@ def tops(mm, *selectors):
 def test_on_a_phone_the_header_takes_two_short_rows(mm):
     mm.page.set_viewport_size({'width': 412, 'height': 915})
     mm.page.wait_for_timeout(200)
-    assert not mm.page.locator('header h1').is_visible()
+    assert mm.page.locator('header .logo').is_visible()                       # the tile stays, the name goes
+    assert mm.page.locator('header .name').bounding_box()['width'] <= 1
     assert len(tops(mm, '#mbFile', '#mbIcons', '#mbImage', '#bHelp', '#bUndo', '#bRedo')) == 1   # menus, Undo, Redo
     assert len(tops(mm, *EDITING)) == 1                                                          # editing commands
     assert mm.page.locator('header').bounding_box()['height'] <= 90
@@ -941,7 +942,8 @@ def test_on_a_narrow_phone_every_editing_button_can_be_reached(mm):
 def test_on_a_phone_in_landscape_the_header_is_one_row(mm):
     mm.page.set_viewport_size({'width': 915, 'height': 412})
     mm.page.wait_for_timeout(200)
-    assert not mm.page.locator('header h1').is_visible()
+    assert mm.page.locator('header .logo').is_visible()                       # the tile stays, the name goes
+    assert mm.page.locator('header .name').bounding_box()['width'] <= 1
     assert len(tops(mm, '#mbFile', '#bChild', '#bDel', '#bRedo')) == 1
 
 
